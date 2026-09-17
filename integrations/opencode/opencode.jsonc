@@ -14,15 +14,5 @@
         "codemode": true
       }
     }
-  },
-  "commands": {
-    "hound-analyze": {
-      "description": "Analyze a failure artifact with Hound Tracer",
-      "template": "Load the hound-tracer skill and analyze the artifact in $ARGUMENTS. Keep Hound offline and verify its evidence before editing code."
-    },
-    "hound-update": {
-      "description": "Show the safe Hound Tracer update procedure",
-      "template": "Load the hound-tracer skill. Inspect how Hound Tracer and its skill were installed, then show the exact update command and target version. Do not modify packages or configuration until I confirm."
-    }
   }
 }

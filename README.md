@@ -653,7 +653,7 @@ The release image runs the main Hound process as a non-root user. Docker availab
 
 ### Coding harnesses
 
-Hound ships a skill, MCP server, and harness-specific examples for OpenCode V2, Hermes Agent, Claude Code, Codex, Cursor, and Antigravity.
+Hound's integration installer is limited to packaged skills, supported plugins, and MCP configuration for OpenCode V2, Hermes Agent, Claude Code, Codex, Cursor, and Antigravity. It does not install standalone command aliases, hooks, or unrelated harness settings.
 
 ```sh
 hound integrations detect

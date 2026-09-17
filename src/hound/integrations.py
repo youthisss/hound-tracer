@@ -250,16 +250,6 @@ def _install_opencode(scope: str, root: Path, dry_run: bool) -> tuple[list[str],
     fragment = {
         "$schema": "https://opencode.ai/config.json",
         "mcp": {"servers": _mcp_server()},
-        "commands": {
-            "hound-analyze": {
-                "description": "Analyze a failure artifact with Hound Tracer",
-                "template": "Load the hound-tracer skill and analyze the artifact in $ARGUMENTS. Keep Hound offline and verify its evidence before editing code.",
-            },
-            "hound-update": {
-                "description": "Show the safe Hound Tracer update procedure",
-                "template": "Load the hound-tracer skill. Inspect how Hound Tracer and its skill were installed, then show the exact update command and target version. Do not modify packages or configuration until I confirm.",
-            },
-        },
     }
     did_change, backup = _merge_json_config(config, fragment, dry_run=dry_run)
     if did_change:

@@ -31,6 +31,7 @@ def test_opencode_install_preserves_existing_servers_and_creates_backup(tmp_path
     assert installed["model"] == "example/model"
     assert installed["mcp"]["servers"]["other"]["url"] == "https://example.test"
     assert installed["mcp"]["servers"]["hound"]["command"] == ["hound-mcp"]
+    assert "commands" not in installed
     assert (home / ".config" / "opencode" / "skills" / "hound-tracer" / "SKILL.md").is_file()
     assert config.with_suffix(".jsonc.hound.bak").is_file()
 
@@ -118,7 +119,7 @@ def test_uninstall_integrations_preserves_unrelated_configuration(tmp_path, monk
     remaining = json.loads(opencode.read_text(encoding="utf-8"))
     assert remaining["model"] == "example/model"
     assert set(remaining["mcp"]["servers"]) == {"other"}
-    assert "hound-analyze" not in remaining["commands"]
+    assert "commands" not in remaining
     assert not (home / ".config" / "opencode" / "skills" / "hound-tracer").exists()
     assert "hound" not in json.loads((home / ".claude.json").read_text(encoding="utf-8"))["mcpServers"]
     assert "[mcp_servers.hound]" not in (home / ".codex" / "config.toml").read_text(encoding="utf-8")
