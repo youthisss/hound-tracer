@@ -19,11 +19,11 @@ JUNIT_XML = (
 def test_tui_analyze_all_processes_visible_logs(tmp_path):
     from textual.widgets import Static
 
-    from hound.tui import RcaTui
+    from hound.tui import HoundTui
 
     shutil.copy(FIXTURES / "pytest_fail.log", tmp_path / "a.log")
     shutil.copy(FIXTURES / "flaky.log", tmp_path / "b.log")
-    app = RcaTui(logs_dir=str(tmp_path), out_dir=str(tmp_path / "out"), offline=True)
+    app = HoundTui(logs_dir=str(tmp_path), out_dir=str(tmp_path / "out"), offline=True)
 
     async def main():
         async with app.run_test() as pilot:
@@ -47,9 +47,9 @@ def test_tui_analyze_all_processes_visible_logs(tmp_path):
 def test_tui_analyze_all_empty_selection_is_noop(tmp_path):
     from textual.widgets import Button, Static
 
-    from hound.tui import RcaTui
+    from hound.tui import HoundTui
 
-    app = RcaTui(logs_dir=str(tmp_path), out_dir=str(tmp_path / "out"), offline=True)
+    app = HoundTui(logs_dir=str(tmp_path), out_dir=str(tmp_path / "out"), offline=True)
 
     async def main():
         async with app.run_test() as pilot:
@@ -66,9 +66,9 @@ def test_tui_analyze_all_empty_selection_is_noop(tmp_path):
 def test_tui_lists_structured_artifacts_alongside_logs(tmp_path):
     from textual.widgets import ListView, Static
 
-    from hound.tui import RcaTui
+    from hound.tui import HoundTui
 
-    app = RcaTui(logs_dir=str(tmp_path), out_dir=str(tmp_path / "out"), offline=True)
+    app = HoundTui(logs_dir=str(tmp_path), out_dir=str(tmp_path / "out"), offline=True)
 
     async def main():
         async with app.run_test() as pilot:
@@ -90,8 +90,8 @@ def test_tui_lists_structured_artifacts_alongside_logs(tmp_path):
 
 
 def test_tui_artifact_refresh_ignores_unmounted_workspace(tmp_path):
-    from hound.tui import RcaTui
+    from hound.tui import HoundTui
 
-    app = RcaTui(logs_dir=str(tmp_path), out_dir=str(tmp_path / "out"), offline=True)
+    app = HoundTui(logs_dir=str(tmp_path), out_dir=str(tmp_path / "out"), offline=True)
 
     app._refresh_artifact_selection()

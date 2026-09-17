@@ -2,6 +2,8 @@ import io
 import json
 from pathlib import Path
 import sys
+import threading
+import time
 
 from hound.cli import main
 from hound.collector import collect_command
@@ -85,7 +87,44 @@ def test_log_metadata_redacts_sensitive_arguments(tmp_path):
     assert "[REDACTED:argument]" in serialized
 
 
+def test_command_capture_has_aggregate_output_limit(tmp_path):
+    output = tmp_path / "bounded.log"
+    result = collect_command(
+        [sys.executable, "-c", "print('x' * 1000)"],
+        output=output,
+        stream=io.StringIO(),
+        max_output_bytes=100,
+    )
+
+    assert result.metadata["output_truncated"] is True
+    assert "[TRUNCATED:output_limit_reached]" in output.read_text(encoding="utf-8")
+    assert output.stat().st_size < 200
+
+
+def test_command_can_be_cancelled(tmp_path):
+    cancel = threading.Event()
+
+    def request_cancel():
+        time.sleep(0.15)
+        cancel.set()
+
+    thread = threading.Thread(target=request_cancel)
+    thread.start()
+    result = collect_command(
+        [sys.executable, "-c", "import time; time.sleep(30)"],
+        output=tmp_path / "cancelled.log",
+        stream=io.StringIO(),
+        timeout=10,
+        cancel_event=cancel,
+    )
+    thread.join()
+
+    assert result.exit_code == 130
+    assert result.metadata["cancelled"] is True
+
+
 def test_log_analyze_uses_shared_service(tmp_path, monkeypatch, capsys):
+    monkeypatch.chdir(tmp_path)
     output = tmp_path / "analyze.log"
     calls = []
     document = json.loads(

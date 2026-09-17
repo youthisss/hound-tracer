@@ -1,0 +1,7 @@
+.hound/captures/
+.hound/results/
+.hound/runs/
+.hound/state/
+test-results/
+reports/
+logs/

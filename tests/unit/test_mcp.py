@@ -34,7 +34,7 @@ def test_mcp_server_initialize():
     assert resp["jsonrpc"] == "2.0"
     assert resp["id"] == 1
     assert resp["result"]["protocolVersion"] == PROTOCOL_VERSION
-    assert resp["result"]["serverInfo"]["name"] == "hound-mcp"
+    assert resp["result"]["serverInfo"]["name"] == "hound-tracer"
     assert resp["result"]["serverInfo"]["version"] == __version__
     assert "tools" in resp["result"]["capabilities"]
 

@@ -1,5 +1,8 @@
 import shutil
+import sys
+import json
 from argparse import Namespace
+from pathlib import Path
 
 import anyio
 import pytest
@@ -32,9 +35,9 @@ def test_tui_compose(tmp_path):
     shutil.copy(FIXTURES / "pytest_fail.log", tmp_path / "pytest_fail.log")
     shutil.copy(FIXTURES / "build_error.log", tmp_path / "build_error.log")
 
-    from hound.tui import RcaTui
+    from hound.tui import HoundTui
 
-    app = RcaTui(logs_dir=str(tmp_path), out_dir=str(tmp_path / "out"), offline=True, provider="openai")
+    app = HoundTui(logs_dir=str(tmp_path), out_dir=str(tmp_path / "out"), offline=True, provider="openai")
     assert app.state_path == str((tmp_path / "out" / ".hound" / "state.json").resolve())
     _run(app)
     assert len(app._log_files) == 2
@@ -42,9 +45,9 @@ def test_tui_compose(tmp_path):
 
 
 def test_tui_starts_without_focused_widget(tmp_path):
-    from hound.tui import RcaTui
+    from hound.tui import HoundTui
 
-    app = RcaTui(logs_dir=str(tmp_path), out_dir=str(tmp_path / "out"), offline=True)
+    app = HoundTui(logs_dir=str(tmp_path), out_dir=str(tmp_path / "out"), offline=True)
 
     async def main():
         async with app.run_test(size=(130, 35)) as pilot:
@@ -56,25 +59,25 @@ def test_tui_starts_without_focused_widget(tmp_path):
 
 def test_tui_resolves_redacted_raw_log_path(tmp_path):
     from hound.ingest.redact import redact_text
-    from hound.tui import RcaTui
+    from hound.tui import HoundTui
 
     log = tmp_path / "person@example.com.log"
     log.write_text("safe", encoding="utf-8")
-    app = RcaTui(logs_dir=str(tmp_path), out_dir=str(tmp_path / "out"), offline=True)
+    app = HoundTui(logs_dir=str(tmp_path), out_dir=str(tmp_path / "out"), offline=True)
     app._log_files = [log]
     stored = redact_text(str(log.resolve()))[0]
     assert app._resolve_raw_path({"meta": {"log_file": stored}}) == log
 
 
 def test_tui_rejects_raw_log_path_outside_logs_directory(tmp_path):
-    from hound.tui import RcaTui
+    from hound.tui import HoundTui
     from textual.widgets import Static
 
     logs = tmp_path / "logs"
     logs.mkdir()
     outside = tmp_path / "outside.log"
     outside.write_text("must not be rendered", encoding="utf-8")
-    app = RcaTui(logs_dir=str(logs), out_dir=str(tmp_path / "out"), offline=True)
+    app = HoundTui(logs_dir=str(logs), out_dir=str(tmp_path / "out"), offline=True)
     app._log_files = [outside]
 
     assert app._resolve_raw_path({"meta": {"log_file": str(outside.resolve())}}) is None
@@ -90,12 +93,12 @@ def test_tui_rejects_raw_log_path_outside_logs_directory(tmp_path):
 
 def test_tui_rejects_malformed_stored_report_before_opening(tmp_path):
     from hound.output.report import ensure_outdir
-    from hound.tui import RcaTui
+    from hound.tui import HoundTui
 
     output = ensure_outdir(tmp_path / "out")
     run = ensure_outdir(output / "run-invalid")
     (run / "report.json").write_text("{}", encoding="utf-8")
-    app = RcaTui(logs_dir=str(tmp_path), out_dir=str(output), offline=True)
+    app = HoundTui(logs_dir=str(tmp_path), out_dir=str(output), offline=True)
 
     async def main():
         async with app.run_test() as pilot:
@@ -113,11 +116,11 @@ def test_tui_rejects_malformed_stored_report_before_opening(tmp_path):
 
 
 def test_tui_uses_resolved_yaml_provider_settings(tmp_path):
-    from hound.tui import RcaTui
+    from hound.tui import HoundTui
 
     config = tmp_path / "config.yml"
     config.write_text("llm:\n  provider: gemini\n  model: gemini-2.0-flash\n", encoding="utf-8")
-    app = RcaTui(logs_dir=str(tmp_path), out_dir=str(tmp_path / "out"), config_path=str(config), offline=True)
+    app = HoundTui(logs_dir=str(tmp_path), out_dir=str(tmp_path / "out"), config_path=str(config), offline=True)
     assert app.provider == "gemini"
     assert app.model == "gemini-2.0-flash"
     assert "generativelanguage.googleapis.com" in app.base_url
@@ -137,7 +140,7 @@ def test_tui_config_preview_uses_bounded_verified_reader(tmp_path, monkeypatch):
 
     monkeypatch.setattr(tui, "read_bounded_text", tracked_read)
     with pytest.raises(ValueError, match="config exceeds"):
-        tui.RcaTui(logs_dir=str(tmp_path), out_dir=str(tmp_path / "out"), config_path=str(config), offline=True)
+        tui.HoundTui(logs_dir=str(tmp_path), out_dir=str(tmp_path / "out"), config_path=str(config), offline=True)
     assert any(str(path) == str(config) and limit == tui.MAX_CONFIG_BYTES for path, limit in calls)
 
 
@@ -154,7 +157,7 @@ def test_tui_log_classification_uses_verified_prefix_reader(tmp_path, monkeypatc
         return original(path, **kwargs)
 
     monkeypatch.setattr(tui, "open_verified_regular", tracked_open)
-    stage, kind = tui.RcaTui._log_classification(log)
+    stage, kind = tui.HoundTui._log_classification(log)
     assert stage == "test"
     assert kind == "test_failure"
     assert calls == [log]
@@ -162,10 +165,10 @@ def test_tui_log_classification_uses_verified_prefix_reader(tmp_path, monkeypatc
 
 def test_tui_analyze(tmp_path):
     shutil.copy(FIXTURES / "pytest_fail.log", tmp_path / "pytest_fail.log")
-    from hound.tui import RcaTui
+    from hound.tui import HoundTui
     from textual.widgets import ListView, Static
 
-    app = RcaTui(logs_dir=str(tmp_path), out_dir=str(tmp_path / "out"), offline=True)
+    app = HoundTui(logs_dir=str(tmp_path), out_dir=str(tmp_path / "out"), offline=True)
 
     async def main():
         async with app.run_test() as pilot:
@@ -189,15 +192,17 @@ def test_tui_analyze(tmp_path):
                     break
                 await pilot.pause(0.02)
             assert app._runs  # run list populated after analysis
+            assert app.query_one("#home").display is True
+            assert app.query_one("#results-workspace").display is False
 
     anyio.run(main)
 
 
 def test_tui_no_logs(tmp_path):
-    from hound.tui import RcaTui
+    from hound.tui import HoundTui
     from textual.widgets import Button, Static
 
-    app = RcaTui(logs_dir=str(tmp_path), out_dir=str(tmp_path / "out"), offline=True)
+    app = HoundTui(logs_dir=str(tmp_path), out_dir=str(tmp_path / "out"), offline=True)
 
     async def main():
         async with app.run_test() as pilot:
@@ -214,11 +219,327 @@ def test_tui_no_logs(tmp_path):
     anyio.run(main)
 
 
+def test_tui_discovers_nested_artifacts_and_ignores_dependencies(tmp_path):
+    from hound.tui import HoundTui
+
+    report = tmp_path / "test-results" / "unit" / "junit.xml"
+    report.parent.mkdir(parents=True)
+    report.write_text(
+        "<testsuite tests='1' failures='1'><testcase name='fails'><failure message='boom'/></testcase></testsuite>",
+        encoding="utf-8",
+    )
+    ignored = tmp_path / "node_modules" / "package" / "debug.log"
+    ignored.parent.mkdir(parents=True)
+    ignored.write_text("not project evidence", encoding="utf-8")
+
+    app = HoundTui(logs_dir=str(tmp_path), out_dir=str(tmp_path / "out"), offline=True)
+    _run(app)
+
+    assert app._log_files == [report]
+    assert app._artifact_display_path(report) == str(report.relative_to(tmp_path))
+
+
+def test_tui_runs_project_captures_output_and_rescans_artifacts(tmp_path):
+    from hound.tui import HoundTui
+
+    app = HoundTui(logs_dir=str(tmp_path), out_dir=str(tmp_path / "out"), offline=True)
+
+    async def main():
+        async with app.run_test() as pilot:
+            await pilot.pause()
+            app.start_project_run([
+                sys.executable,
+                "-c",
+                "from pathlib import Path; "
+                "Path('test-results').mkdir(); "
+                "Path('test-results/junit.xml').write_text(\"<testsuite tests='1' failures='1'><testcase name='x'><failure message='boom'/></testcase></testsuite>\") ; "
+                "print('FAILED generated test')",
+            ])
+            for _ in range(300):
+                await pilot.pause(0.02)
+                if not app._running_project and (tmp_path / ".hound" / "captures").is_dir():
+                    break
+
+            capture_logs = list((tmp_path / ".hound" / "captures").glob("*.log"))
+            report = tmp_path / "test-results" / "junit.xml"
+            assert capture_logs
+            assert report in app._log_files
+            assert capture_logs[0] in app._log_files
+            records = list((tmp_path / ".hound" / "runs").glob("*.json"))
+            assert len(records) == 1
+            record = __import__("json").loads(records[0].read_text(encoding="utf-8"))
+            assert record["status"] == "passed"
+            assert str(report) in record["artifacts"]
+            assert app.query_one("#home").display is True
+            assert app.query_one("#project-runs-workspace").display is False
+
+    anyio.run(main)
+
+
+def test_tui_project_runs_have_separate_workspace(tmp_path):
+    from hound.tui import HoundTui
+    from textual.widgets import Button
+
+    app = HoundTui(logs_dir=str(tmp_path), out_dir=str(tmp_path / "out"), offline=True)
+
+    async def main():
+        async with app.run_test() as pilot:
+            await pilot.pause()
+            assert not list(app.query("#workspace-run-project"))
+            app.query_one("#nav-runs", Button).press()
+            await pilot.pause()
+            assert app.query_one("#project-runs-workspace").display is True
+            assert app.query_one("#artifact-workspace").display is False
+            assert app.query_one("#project-runs-start", Button).disabled is False
+
+    anyio.run(main)
+
+
+def test_tui_exit_shortcuts_are_bound_to_quit(tmp_path):
+    from hound.tui import HoundTui
+
+    bindings = {binding.key: binding.action for binding in HoundTui.BINDINGS}
+
+    assert bindings["ctrl+c"] == "quit"
+    assert bindings["q"] == "exit_tui"
+
+
+def test_tui_ctrl_c_requests_shell_exit(tmp_path):
+    from hound.tui import HoundTui
+
+    app = HoundTui(
+        logs_dir=str(tmp_path),
+        out_dir=str(tmp_path / "out"),
+        offline=True,
+        return_to_launcher=True,
+    )
+
+    async def main():
+        async with app.run_test() as pilot:
+            await pilot.press("ctrl+c")
+
+    anyio.run(main)
+    assert app.return_value == "shell"
+
+
+def test_run_project_modal_shows_context_and_recent_commands(tmp_path):
+    from hound.tui import HoundTui, RunProjectScreen
+    from textual.widgets import Button, Input, Static
+
+    app = HoundTui(logs_dir=str(tmp_path), out_dir=str(tmp_path / "out"), offline=True)
+    app._project_runs = [
+        {"command": ["pytest", "-q"]},
+        {"command": ["npm", "test"]},
+        {"command": ["pytest", "-q"]},
+    ]
+
+    async def main():
+        async with app.run_test() as pilot:
+            app.push_screen(RunProjectScreen(app))
+            await pilot.pause()
+            screen = app.screen
+            assert screen.query_one("#run-project-directory", Input).value == str(tmp_path)
+            assert ".hound" in str(screen.query_one("#run-project-capture", Static).renderable)
+            assert len(list(screen.query("#run-project-recent Button"))) == 2
+            submit = screen.query_one("#run-project-submit", Button)
+            assert submit.disabled
+            screen.query_one("#run-project-recent-0", Button).press()
+            await pilot.pause()
+            assert screen.query_one("#run-project-command", Input).value == "pytest -q"
+            assert not submit.disabled
+
+    anyio.run(main)
+
+
+def test_run_project_modal_uses_selected_working_directory(tmp_path):
+    from hound.tui import HoundTui, RunProjectScreen
+    from textual.widgets import Button, Input, Static
+
+    initial = tmp_path / "initial"
+    selected = tmp_path / "selected"
+    initial.mkdir()
+    selected.mkdir()
+    app = HoundTui(logs_dir=str(initial), out_dir=str(tmp_path / "out"), offline=True)
+
+    async def main():
+        async with app.run_test() as pilot:
+            app.push_screen(RunProjectScreen(app))
+            await pilot.pause()
+            screen = app.screen
+            directory = screen.query_one("#run-project-directory", Input)
+            command = screen.query_one("#run-project-command", Input)
+            submit = screen.query_one("#run-project-submit", Button)
+
+            directory.value = str(selected)
+            command.value = f'{sys.executable} -c "print(\"ok\")"'
+            await pilot.pause()
+            assert not submit.disabled
+            assert str(selected / ".hound" / "captures") in str(
+                screen.query_one("#run-project-capture", Static).renderable
+            )
+
+            screen._submit()
+            for _ in range(200):
+                await pilot.pause(0.02)
+                if not app._running_project:
+                    break
+
+            assert app.logs_dir == selected.resolve()
+            assert app._project_runs[0]["cwd"] == str(selected.resolve())
+            assert __import__("pathlib").Path(app._project_runs[0]["capture"]).parent == selected / ".hound" / "captures"
+
+    anyio.run(main)
+
+
+def test_run_project_modal_discovers_only_safe_manifest_commands(tmp_path):
+    import json
+
+    from hound.tui import HoundTui, RunProjectScreen
+    from textual.widgets import Button, Input
+
+    (tmp_path / "package.json").write_text(json.dumps({
+        "scripts": {
+            "test": "vitest run",
+            "build": "vite build",
+            "deploy": "publish-production",
+            "lint": "eslint . && rm -rf dist",
+            "dev": "vite",
+        }
+    }), encoding="utf-8")
+    app = HoundTui(logs_dir=str(tmp_path), out_dir=str(tmp_path / "out"), offline=True)
+
+    async def main():
+        async with app.run_test() as pilot:
+            app.push_screen(RunProjectScreen(app))
+            await pilot.pause()
+            screen = app.screen
+            detected = list(screen.query("#run-project-detected Button"))
+            assert len(detected) == 2
+            labels = {str(button.label) for button in detected}
+            assert labels == {"npm test", "npm build"}
+            screen.query_one("#run-project-detected-0", Button).press()
+            await pilot.pause()
+            assert "npm" in screen.query_one("#run-project-command", Input).value
+            assert "test" in screen.query_one("#run-project-command", Input).value
+
+    anyio.run(main)
+
+
+def test_command_discovery_supports_common_project_manifests(tmp_path):
+    from hound.tui import _discover_project_commands
+
+    (tmp_path / "Cargo.toml").write_text("[package]\nname='demo'", encoding="utf-8")
+    (tmp_path / "go.mod").write_text("module example.test/demo", encoding="utf-8")
+    (tmp_path / "Makefile").write_text("test:\n\tpytest\ndeploy:\n\tship\nclean:\n\trm -rf dist\n", encoding="utf-8")
+
+    commands = [command for _label, command in _discover_project_commands(tmp_path)]
+    assert ["cargo", "test"] in commands
+    assert ["cargo", "build"] in commands
+    assert ["go", "test", "./..."] in commands
+    assert ["make", "test"] in commands
+    assert ["make", "deploy"] not in commands
+    assert ["make", "clean"] not in commands
+
+
+def test_sample_project_exercises_run_discovery_and_all_trace_formats(tmp_path):
+    from hound import service
+    from hound.tui import HoundTui, _discover_project_commands
+
+    project = tmp_path / "sample-project"
+    shutil.copytree(FIXTURES / "sample-project", project)
+    suggestions = _discover_project_commands(project)
+    labels = {label for label, _command in suggestions}
+    assert {"npm test", "npm build", "npm lint", "pytest"} <= labels
+    assert "npm deploy" not in labels
+    assert "npm clean" not in labels
+
+    app = HoundTui(logs_dir=str(project), out_dir=str(tmp_path / "out"), offline=True)
+
+    async def main():
+        async with app.run_test() as pilot:
+            await pilot.pause()
+            app.start_project_run([sys.executable, "scripts/run_checks.py", "test"])
+            for _ in range(300):
+                await pilot.pause(0.02)
+                if not app._running_project and list((project / ".hound" / "runs").glob("*.json")):
+                    break
+
+            artifacts = service.discover_artifacts(project)
+            suffixes = {path.suffix for path in artifacts}
+            assert {".log", ".xml", ".json", ".sarif"} <= suffixes
+            assert any(path.parent.name == "captures" for path in artifacts)
+            assert (project / "reports" / "coverage.xml").is_file()
+            assert (project / "quality.yml").is_file()
+            assert app._project_runs[0]["status"] == "failed"
+            assert len(app._project_runs[0]["artifacts"]) >= 5
+
+    anyio.run(main)
+
+
+def test_project_run_persists_only_redacted_command(tmp_path):
+    from hound import service
+
+    request = service.prepare_project_run(
+        [sys.executable, "-c", "print('ok')", "--token", "do-not-store-this"],
+        tmp_path,
+        timeout=10,
+    )
+    result = service.execute_project_run(request)
+    serialized = json.dumps(result.record)
+
+    assert "do-not-store-this" not in serialized
+    assert "[REDACTED:argument]" in serialized
+
+
+def test_project_run_request_keeps_immutable_directory(tmp_path):
+    from hound import service
+
+    first = tmp_path / "first"
+    second = tmp_path / "second"
+    first.mkdir()
+    second.mkdir()
+    request = service.prepare_project_run([sys.executable, "-c", "print('ok')"], first)
+    result = service.execute_project_run(request)
+
+    assert result.record["cwd"] == str(first.resolve())
+    assert Path(result.record["capture"]).is_relative_to(first.resolve())
+    assert not (second / ".hound").exists()
+
+
+def test_project_run_rejects_symlinked_state_directory(tmp_path):
+    from hound import service
+
+    target = tmp_path / "target"
+    project = tmp_path / "project"
+    target.mkdir()
+    project.mkdir()
+    try:
+        (project / ".hound").symlink_to(target, target_is_directory=True)
+    except OSError:
+        pytest.skip("directory symlinks are unavailable")
+
+    with pytest.raises(ValueError, match="symlink"):
+        service.prepare_project_run([sys.executable, "-c", "print('ok')"], project)
+
+
+def test_corrupt_project_run_is_reported(tmp_path):
+    from hound import service
+
+    runs = tmp_path / "runs"
+    runs.mkdir()
+    (runs / "broken.json").write_text("{broken", encoding="utf-8")
+
+    records, errors = service.load_project_runs(runs)
+
+    assert records == []
+    assert errors and "broken.json" in errors[0]
+
+
 def test_tui_workflow_status_animates_analysis_progress(tmp_path):
-    from hound.tui import RcaTui
+    from hound.tui import HoundTui
     from textual.widgets import Static
 
-    app = RcaTui(logs_dir=str(tmp_path), out_dir=str(tmp_path / "out"), offline=True)
+    app = HoundTui(logs_dir=str(tmp_path), out_dir=str(tmp_path / "out"), offline=True)
 
     async def main():
         async with app.run_test() as pilot:
@@ -241,10 +562,10 @@ def test_tui_ready_status_does_not_repeat_selected_file_name(tmp_path):
     log = tmp_path / "selected.log"
     log.write_text("test failure", encoding="utf-8")
 
-    from hound.tui import RcaTui
+    from hound.tui import HoundTui
     from textual.widgets import Static
 
-    app = RcaTui(logs_dir=str(tmp_path), out_dir=str(tmp_path / "out"), offline=True)
+    app = HoundTui(logs_dir=str(tmp_path), out_dir=str(tmp_path / "out"), offline=True)
 
     async def main():
         async with app.run_test() as pilot:
@@ -259,10 +580,10 @@ def test_tui_ready_status_does_not_repeat_selected_file_name(tmp_path):
 def test_tui_workspace_analyze_all_runs_visible_logs(tmp_path):
     shutil.copy(FIXTURES / "pytest_fail.log", tmp_path / "pytest_fail.log")
     shutil.copy(FIXTURES / "build_error.log", tmp_path / "build_error.log")
-    from hound.tui import RcaTui
+    from hound.tui import HoundTui
     from textual.widgets import Button, Static
 
-    app = RcaTui(logs_dir=str(tmp_path), out_dir=str(tmp_path / "out"), offline=True)
+    app = HoundTui(logs_dir=str(tmp_path), out_dir=str(tmp_path / "out"), offline=True)
 
     async def main():
         async with app.run_test() as pilot:
@@ -283,9 +604,9 @@ def test_tui_workspace_analyze_all_runs_visible_logs(tmp_path):
 
 def test_tui_stop_action_remains_available_during_analysis(tmp_path, monkeypatch):
     shutil.copy(FIXTURES / "pytest_fail.log", tmp_path / "pytest_fail.log")
-    from hound.tui import RcaTui
+    from hound.tui import HoundTui
 
-    app = RcaTui(logs_dir=str(tmp_path), out_dir=str(tmp_path / "out"), offline=True)
+    app = HoundTui(logs_dir=str(tmp_path), out_dir=str(tmp_path / "out"), offline=True)
 
     async def main():
         async with app.run_test() as pilot:
@@ -306,7 +627,7 @@ def test_tui_parallel_analyze_all_respects_llm_call_cap(tmp_path, monkeypatch):
 
     for name in "abcdef":
         shutil.copy(FIXTURES / "pytest_fail.log", tmp_path / f"{name}.log")
-    from hound.tui import RcaTui
+    from hound.tui import HoundTui
     from textual.widgets import Button, Static
 
     calls = {"n": 0}
@@ -322,7 +643,7 @@ def test_tui_parallel_analyze_all_respects_llm_call_cap(tmp_path, monkeypatch):
     client = SimpleNamespace(chat=SimpleNamespace(completions=SimpleNamespace(create=create)))
     monkeypatch.setattr("hound.analyze.llm._make_client", lambda _config: client)
     monkeypatch.setenv("HOUND_API_KEY", "test-key")
-    app = RcaTui(
+    app = HoundTui(
         logs_dir=str(tmp_path),
         out_dir=str(tmp_path / "out"),
         offline=False,
@@ -351,10 +672,10 @@ def test_tui_parallel_analyze_all_respects_llm_call_cap(tmp_path, monkeypatch):
 
 def test_tui_labels_deployment_log_and_run(tmp_path):
     shutil.copy(FIXTURES / "kubernetes_rollout.log", tmp_path / "kubernetes_rollout.log")
-    from hound.tui import RcaTui
+    from hound.tui import HoundTui
     from textual.widgets import ListView, Static
 
-    app = RcaTui(logs_dir=str(tmp_path), out_dir=str(tmp_path / "out"), offline=True)
+    app = HoundTui(logs_dir=str(tmp_path), out_dir=str(tmp_path / "out"), offline=True)
 
     async def main():
         async with app.run_test() as pilot:
@@ -376,10 +697,10 @@ def test_tui_labels_deployment_log_and_run(tmp_path):
 
 def test_tui_settings_overlay(tmp_path):
     """Settings opens from sidebar instead of main tab row."""
-    from hound.tui import RcaTui, SettingsScreen
+    from hound.tui import HoundTui, SettingsScreen
     from textual.widgets import Select, Static
 
-    app = RcaTui(logs_dir=str(tmp_path), out_dir=str(tmp_path / "out"), offline=True, provider="openai")
+    app = HoundTui(logs_dir=str(tmp_path), out_dir=str(tmp_path / "out"), offline=True, provider="openai")
 
     async def main():
         async with app.run_test() as pilot:
@@ -401,14 +722,45 @@ def test_tui_settings_overlay(tmp_path):
     anyio.run(main)
 
 
+def test_tui_settings_groups_oauth_and_custom_providers_with_analysis(tmp_path):
+    from hound.subscription_auth import NOTICE
+    from hound.tui import HoundTui, SettingsScreen
+    from textual.widgets import Button, Collapsible, Select, Static
+
+    app = HoundTui(logs_dir=str(tmp_path), out_dir=str(tmp_path / "out"), offline=False, provider="openai")
+
+    async def main():
+        async with app.run_test() as pilot:
+            await pilot.pause()
+            app.action_open_settings()
+            await pilot.pause()
+            screen = app.screen
+            assert isinstance(screen, SettingsScreen)
+            provider_section = screen.query_one("#settings-provider-title").parent
+            custom = screen.query_one("#settings-custom-provider", Collapsible)
+            assert custom.parent is provider_section
+            assert NOTICE in str(screen.query_one("#oauth-risk-notice", Static).renderable)
+            assert str(screen.query_one("#settings-oauth-openai", Button).label) == "OpenAI / Codex"
+            assert str(screen.query_one("#settings-oauth-claude", Button).label) == "Claude Code"
+            assert str(screen.query_one("#settings-oauth-gemini", Button).label) == "Gemini CLI"
+            protocol = screen.query_one("#custom-provider-protocol", Select)
+            assert screen.query_one("#custom-provider-url").placeholder == "https://api.openai.com/v1"
+            protocol.value = "anthropic"
+            screen.on_select_changed(type("E", (), {"select": protocol, "value": "anthropic"})())
+            assert screen.query_one("#custom-provider-url").placeholder == "https://api.anthropic.com/v1"
+            assert screen.query_one("#custom-provider-model").placeholder == "e.g. claude-sonnet-4-5"
+
+    anyio.run(main)
+
+
 def test_tui_settings_overlay_model_default(tmp_path):
     """Selecting a provider enables automatic provider model selection."""
     import anyio as _anyio
 
-    from hound.tui import RcaTui, SettingsScreen
+    from hound.tui import HoundTui, SettingsScreen
     from textual.widgets import Select
 
-    app = RcaTui(logs_dir=str(tmp_path), out_dir=str(tmp_path / "out"), offline=True)
+    app = HoundTui(logs_dir=str(tmp_path), out_dir=str(tmp_path / "out"), offline=True)
 
     async def main():
         async with app.run_test() as pilot:
@@ -428,9 +780,9 @@ def test_tui_settings_overlay_model_default(tmp_path):
 
 def test_tui_settings_provider_hint(tmp_path):
     """Provider hint shows base URL + env vars for the selected provider."""
-    from hound.tui import RcaTui
+    from hound.tui import HoundTui
 
-    app = RcaTui(logs_dir=str(tmp_path), out_dir=str(tmp_path / "out"), offline=True, provider="openai")
+    app = HoundTui(logs_dir=str(tmp_path), out_dir=str(tmp_path / "out"), offline=True, provider="openai")
     _run(app)
     hint = app._provider_hint()
     assert "https://api.openai.com/v1" in hint
@@ -438,10 +790,10 @@ def test_tui_settings_provider_hint(tmp_path):
 
 
 def test_tui_settings_updates_provider_hint_and_cancels(tmp_path):
-    from hound.tui import RcaTui, SettingsScreen
+    from hound.tui import HoundTui, SettingsScreen
     from textual.widgets import Select, Static
 
-    app = RcaTui(logs_dir=str(tmp_path), out_dir=str(tmp_path / "out"), offline=True, provider="openai")
+    app = HoundTui(logs_dir=str(tmp_path), out_dir=str(tmp_path / "out"), offline=True, provider="openai")
 
     async def main():
         async with app.run_test() as pilot:
@@ -466,7 +818,7 @@ def test_tui_settings_updates_provider_hint_and_cancels(tmp_path):
 def test_tui_settings_offline_toggle_applies_only_after_save(tmp_path, monkeypatch):
     from hound import tui
     from hound.preferences import save_tui_preferences as save_preferences
-    from hound.tui import RcaTui, SettingsScreen
+    from hound.tui import HoundTui, SettingsScreen
     from textual.widgets import Button
 
     monkeypatch.setattr(
@@ -474,7 +826,7 @@ def test_tui_settings_offline_toggle_applies_only_after_save(tmp_path, monkeypat
         "save_tui_preferences",
         lambda offline, provider, model, **kwargs: save_preferences(offline, provider, model, tmp_path / "tui.yml", **kwargs),
     )
-    app = RcaTui(logs_dir=str(tmp_path), out_dir=str(tmp_path / "out"), offline=False)
+    app = HoundTui(logs_dir=str(tmp_path), out_dir=str(tmp_path / "out"), offline=False)
 
     async def main():
         async with app.run_test() as pilot:
@@ -499,10 +851,10 @@ def test_tui_settings_offline_toggle_applies_only_after_save(tmp_path, monkeypat
 def test_tui_directory_metadata_and_filter(tmp_path):
     shutil.copy(FIXTURES / "pytest_fail.log", tmp_path / "pytest_fail.log")
     shutil.copy(FIXTURES / "build_error.log", tmp_path / "build_error.log")
-    from hound.tui import RcaTui
+    from hound.tui import HoundTui
     from textual.widgets import Button, Input, Static
 
-    app = RcaTui(logs_dir=str(tmp_path), out_dir=str(tmp_path / "out"), offline=True)
+    app = HoundTui(logs_dir=str(tmp_path), out_dir=str(tmp_path / "out"), offline=True)
 
     async def main():
         async with app.run_test() as pilot:
@@ -522,10 +874,10 @@ def test_tui_directory_metadata_and_filter(tmp_path):
 
 
 def test_tui_input_typing_does_not_trigger_global_shortcuts(tmp_path):
-    from hound.tui import RcaTui
+    from hound.tui import HoundTui
     from textual.widgets import Input
 
-    app = RcaTui(logs_dir=str(tmp_path), out_dir=str(tmp_path / "out"), offline=True)
+    app = HoundTui(logs_dir=str(tmp_path), out_dir=str(tmp_path / "out"), offline=True)
 
     async def main():
         async with app.run_test() as pilot:
@@ -547,10 +899,10 @@ def test_tui_input_typing_does_not_trigger_global_shortcuts(tmp_path):
 def test_tui_raw_header_tracks_selected_log(tmp_path):
     shutil.copy(FIXTURES / "pytest_fail.log", tmp_path / "pytest_fail.log")
     shutil.copy(FIXTURES / "build_error.log", tmp_path / "build_error.log")
-    from hound.tui import RcaTui
+    from hound.tui import HoundTui
     from textual.widgets import ListView, Static
 
-    app = RcaTui(logs_dir=str(tmp_path), out_dir=str(tmp_path / "out"), offline=True)
+    app = HoundTui(logs_dir=str(tmp_path), out_dir=str(tmp_path / "out"), offline=True)
 
     async def main():
         async with app.run_test() as pilot:
@@ -567,10 +919,10 @@ def test_tui_enter_analyzes_focused_workspace_artifact(tmp_path):
     shutil.copy(FIXTURES / "pytest_fail.log", tmp_path / "pytest_fail.log")
     shutil.copy(FIXTURES / "build_error.log", tmp_path / "build_error.log")
 
-    from hound.tui import RcaTui
+    from hound.tui import HoundTui
     from textual.widgets import ListView
 
-    app = RcaTui(logs_dir=str(tmp_path), out_dir=str(tmp_path / "out"), offline=True)
+    app = HoundTui(logs_dir=str(tmp_path), out_dir=str(tmp_path / "out"), offline=True)
 
     async def main():
         async with app.run_test() as pilot:
@@ -594,10 +946,10 @@ def test_tui_click_selects_workspace_artifact_without_analyzing(tmp_path):
     shutil.copy(FIXTURES / "pytest_fail.log", tmp_path / "pytest_fail.log")
     shutil.copy(FIXTURES / "build_error.log", tmp_path / "build_error.log")
 
-    from hound.tui import RcaTui
+    from hound.tui import HoundTui
     from textual.widgets import ListView
 
-    app = RcaTui(logs_dir=str(tmp_path), out_dir=str(tmp_path / "out"), offline=True)
+    app = HoundTui(logs_dir=str(tmp_path), out_dir=str(tmp_path / "out"), offline=True)
 
     async def main():
         async with app.run_test(size=(120, 40)) as pilot:
@@ -619,8 +971,8 @@ def test_tui_click_selects_workspace_artifact_without_analyzing(tmp_path):
     anyio.run(main)
 
 
-def test_tui_caps_widgets_but_keeps_all_visible_targets(tmp_path, monkeypatch):
-    from hound.tui import RcaTui
+def test_tui_caps_sidebar_widgets_but_keeps_all_visible_targets(tmp_path, monkeypatch):
+    from hound.tui import HoundTui
     from textual.widgets import ListView, Static
 
     # 201 is the smallest input that proves a third page while keeping this
@@ -628,15 +980,15 @@ def test_tui_caps_widgets_but_keeps_all_visible_targets(tmp_path, monkeypatch):
     total = 201
     for index in range(total):
         (tmp_path / f"log-{index:04d}.log").write_text("ERROR build failed", encoding="utf-8")
-    monkeypatch.setattr(RcaTui, "_log_classification", staticmethod(lambda _path: ("build", "build")))
-    app = RcaTui(logs_dir=str(tmp_path), out_dir=str(tmp_path / "out"), offline=True)
+    monkeypatch.setattr(HoundTui, "_log_classification", staticmethod(lambda _path: ("build", "build")))
+    app = HoundTui(logs_dir=str(tmp_path), out_dir=str(tmp_path / "out"), offline=True)
 
     async def main():
         async with app.run_test(size=(100, 30)) as pilot:
             await pilot.pause()
             assert len(app._visible_log_files) == total
             assert len(app._log_files) == total
-            assert len(app.query_one("#log-list", ListView).children) == total
+            assert len(app.query_one("#log-list", ListView).children) == 101
             assert f"{total} visible" in str(app.query_one("#home-artifacts", Static).renderable)
 
             # Open artifacts workspace
@@ -685,7 +1037,7 @@ def test_tui_browse_directory_loads_selected_folder(tmp_path, monkeypatch):
     from textual.widgets import Input
 
     monkeypatch.setattr(tui, "_choose_directory", lambda _initial: str(selected))
-    app = tui.RcaTui(logs_dir=str(initial), out_dir=str(tmp_path / "out"), offline=True)
+    app = tui.HoundTui(logs_dir=str(initial), out_dir=str(tmp_path / "out"), offline=True)
 
     async def main():
         async with app.run_test() as pilot:
@@ -713,7 +1065,7 @@ def test_tui_artifact_workspace_browse_loads_selected_folder(tmp_path, monkeypat
     from textual.widgets import Button, Input
 
     monkeypatch.setattr(tui, "_choose_directory", lambda _initial: str(selected))
-    app = tui.RcaTui(logs_dir=str(initial), out_dir=str(tmp_path / "out"), offline=True)
+    app = tui.HoundTui(logs_dir=str(initial), out_dir=str(tmp_path / "out"), offline=True)
 
     async def main():
         async with app.run_test() as pilot:
@@ -738,7 +1090,7 @@ def test_tui_browse_directory_cancel_keeps_current_folder(tmp_path, monkeypatch)
     from hound import tui
 
     monkeypatch.setattr(tui, "_choose_directory", lambda _initial: "")
-    app = tui.RcaTui(logs_dir=str(tmp_path), out_dir=str(tmp_path / "out"), offline=True)
+    app = tui.HoundTui(logs_dir=str(tmp_path), out_dir=str(tmp_path / "out"), offline=True)
 
     async def main():
         async with app.run_test() as pilot:
@@ -752,10 +1104,10 @@ def test_tui_browse_directory_cancel_keeps_current_folder(tmp_path, monkeypatch)
 
 
 def test_tui_settings_follows_workflow_and_shortcut_opens_overlay(tmp_path):
-    from hound.tui import RcaTui, SettingsScreen
+    from hound.tui import HoundTui, SettingsScreen
     from textual.widgets import Button, Static
 
-    app = RcaTui(logs_dir=str(tmp_path), out_dir=str(tmp_path / "out"), offline=True)
+    app = HoundTui(logs_dir=str(tmp_path), out_dir=str(tmp_path / "out"), offline=True)
 
     async def main():
         async with app.run_test() as pilot:
@@ -777,10 +1129,10 @@ def test_tui_settings_follows_workflow_and_shortcut_opens_overlay(tmp_path):
 
 
 def test_tui_main_content_uses_scrollbars_only_when_needed(tmp_path):
-    from hound.tui import RcaTui, ResultScroll
+    from hound.tui import HoundTui, ResultScroll
     from textual.widgets import Static
 
-    app = RcaTui(logs_dir=str(tmp_path), out_dir=str(tmp_path / "out"), offline=True)
+    app = HoundTui(logs_dir=str(tmp_path), out_dir=str(tmp_path / "out"), offline=True)
 
     async def main():
         async with app.run_test() as pilot:
@@ -804,23 +1156,21 @@ def test_tui_main_content_uses_scrollbars_only_when_needed(tmp_path):
     anyio.run(main)
 
 
-def test_tui_sidebar_can_minimize_and_keeps_workspace_navigation(tmp_path):
-    from hound.tui import RcaTui
+def test_tui_sidebar_starts_closed_and_can_toggle(tmp_path):
+    from hound.tui import HoundTui
     from textual.widgets import Button, Static
 
-    app = RcaTui(logs_dir=str(tmp_path), out_dir=str(tmp_path / "out"), offline=True)
+    app = HoundTui(logs_dir=str(tmp_path), out_dir=str(tmp_path / "out"), offline=True)
 
     async def main():
         async with app.run_test(size=(130, 35)) as pilot:
-            await pilot.pause()
-            app.action_toggle_sidebar()
             await pilot.pause()
             sidebar = app.query_one("#sidebar")
             assert app.has_class("sidebar-collapsed")
             assert sidebar.display is False
             show_sidebar = app.query_one("#show-sidebar", Button)
             assert show_sidebar.display is True
-            assert str(show_sidebar.label) == "==="
+            assert str(show_sidebar.label) == "≡"
 
             show_sidebar.press()
             await pilot.pause()
@@ -829,6 +1179,11 @@ def test_tui_sidebar_can_minimize_and_keeps_workspace_navigation(tmp_path):
             assert app.query_one("#show-sidebar", Button).display is False
             assert app.query_one("#log-list").display is True
 
+            app.action_toggle_sidebar()
+            await pilot.pause()
+            assert app.has_class("sidebar-collapsed")
+            assert sidebar.display is False
+
             shortcutbar = str(app.query_one("#shortcutbar", Static).renderable)
             assert "sidebar" in shortcutbar
             assert not app.query("#sidebar-toggle")
@@ -836,14 +1191,67 @@ def test_tui_sidebar_can_minimize_and_keeps_workspace_navigation(tmp_path):
     anyio.run(main)
 
 
+@pytest.mark.parametrize("size", [(160, 50), (100, 35), (70, 24)])
+def test_tui_navigation_highlight_fills_to_idle_border_bounds(tmp_path, size):
+    from hound.tui import HoundTui
+    from textual.geometry import Region
+
+    app = HoundTui(logs_dir=str(tmp_path), out_dir=str(tmp_path / "out"), offline=True)
+
+    async def main():
+        async with app.run_test(size=size) as pilot:
+            app._show_results("pane-report")
+            if not app.has_class("sidebar-collapsed"):
+                app.action_toggle_sidebar()
+            await pilot.pause()
+            for selector in ("#show-sidebar", "#back-button"):
+                button = app.query_one(selector)
+                app.set_focus(None)
+                await pilot.hover("#statusbar")
+                await pilot.pause()
+                region = button.region
+                crop = Region(0, 0, region.width, region.height)
+                idle = [list(strip) for strip in button.render_lines(crop)]
+                assert "".join(segment.text for segment in idle[0]) == "┌─────┐"
+                assert "".join(segment.text for segment in idle[-1]) == "└─────┘"
+                for state in ("hover", "focus", "active"):
+                    if state == "hover":
+                        await pilot.hover(button)
+                    elif state == "focus":
+                        await pilot.hover("#statusbar")
+                        button.focus()
+                    else:
+                        app.set_focus(None)
+                        button.add_class("-active")
+                    await pilot.pause()
+                    rendered = [list(strip) for strip in button.render_lines(crop)]
+                    assert button.region == region
+                    assert "".join(segment.text for segment in rendered[0]) == "▗▄▄▄▄▄▖"
+                    assert "".join(segment.text for segment in rendered[-1]) == "▝▀▀▀▀▀▘"
+                    assert rendered[1][0].text == "▐"
+                    assert rendered[1][-1].text == "▌"
+                    edges = rendered[0] + rendered[-1] + [rendered[1][0], rendered[1][-1]]
+                    assert all(segment.style.color.triplet == (255, 255, 255) for segment in edges)
+                    assert all(segment.style.bgcolor.triplet == (0, 0, 0) for segment in edges)
+                    interior = rendered[1][1:-1]
+                    assert sum(segment.cell_length for segment in interior) == region.width - 2
+                    assert all(not segment.style.reverse for segment in interior)
+                    assert all(segment.style.bgcolor.triplet == (255, 255, 255) for segment in interior)
+                    assert all(segment.style.color.triplet == (0, 0, 0) for segment in interior)
+                    assert "".join(segment.text for segment in interior) == str(button.label).center(region.width - 2)
+                button.remove_class("-active")
+
+    anyio.run(main)
+
+
 def test_tui_artifact_workspace_multi_select_and_batch_analyze(tmp_path, monkeypatch):
-    from hound.tui import RcaTui
+    from hound.tui import HoundTui
     from textual.widgets import Button, ListView, Static
 
     for index in range(5):
         (tmp_path / f"log-{index:02d}.log").write_text("ERROR build failed", encoding="utf-8")
-    monkeypatch.setattr(RcaTui, "_log_classification", staticmethod(lambda _path: ("build", "build")))
-    app = RcaTui(logs_dir=str(tmp_path), out_dir=str(tmp_path / "out"), offline=True)
+    monkeypatch.setattr(HoundTui, "_log_classification", staticmethod(lambda _path: ("build", "build")))
+    app = HoundTui(logs_dir=str(tmp_path), out_dir=str(tmp_path / "out"), offline=True)
 
     async def main():
         async with app.run_test() as pilot:
@@ -911,14 +1319,14 @@ def test_tui_artifact_workspace_multi_select_and_batch_analyze(tmp_path, monkeyp
 def test_tui_help_and_offline_toggle(tmp_path, monkeypatch):
     from hound import tui
     from hound.preferences import save_tui_preferences as save_preferences
-    from hound.tui import HelpScreen, RcaTui
+    from hound.tui import HelpScreen, HoundTui
 
     monkeypatch.setattr(
         tui,
         "save_tui_preferences",
         lambda offline, provider, model, **kwargs: save_preferences(offline, provider, model, tmp_path / "tui.yml", **kwargs),
     )
-    app = RcaTui(logs_dir=str(tmp_path), out_dir=str(tmp_path / "out"), offline=False)
+    app = HoundTui(logs_dir=str(tmp_path), out_dir=str(tmp_path / "out"), offline=False)
 
     async def main():
         async with app.run_test() as pilot:
@@ -936,12 +1344,12 @@ def test_tui_help_and_offline_toggle(tmp_path, monkeypatch):
 def test_tui_recent_run_loads_all_panes(tmp_path):
     shutil.copy(FIXTURES / "pytest_fail.log", tmp_path / "pytest_fail.log")
     from hound.pipeline import analyze
-    from hound.tui import RcaTui
+    from hound.tui import HoundTui
     from textual.widgets import Markdown, Static
 
     out = tmp_path / "out"
     analyze(tmp_path / "pytest_fail.log", out, offline=True)
-    app = RcaTui(logs_dir=str(tmp_path), out_dir=str(out), offline=True)
+    app = HoundTui(logs_dir=str(tmp_path), out_dir=str(out), offline=True)
 
     async def main():
         async with app.run_test() as pilot:
@@ -968,9 +1376,9 @@ def test_tui_recent_run_loads_all_panes(tmp_path):
 
 
 def test_tui_workspace_shortcuts(tmp_path):
-    from hound.tui import RcaTui
+    from hound.tui import HoundTui
 
-    app = RcaTui(logs_dir=str(tmp_path), out_dir=str(tmp_path / "out"), offline=True)
+    app = HoundTui(logs_dir=str(tmp_path), out_dir=str(tmp_path / "out"), offline=True)
 
     async def main():
         async with app.run_test() as pilot:
@@ -987,6 +1395,12 @@ def test_tui_workspace_shortcuts(tmp_path):
             assert app.query_one("#results-workspace").display is True
             assert app.query_one("#artifact-workspace").display is False
 
+            # Press 'j' to open project runs
+            await pilot.press("j")
+            await pilot.pause()
+            assert app.query_one("#project-runs-workspace").display is True
+            assert app.query_one("#results-workspace").display is False
+
             # Press 'h' to go home
             await pilot.press("h")
             await pilot.pause()
@@ -1000,10 +1414,10 @@ def test_tui_workspace_shortcuts(tmp_path):
 def test_tui_workspace_filters_sync_and_filter(tmp_path):
     shutil.copy(FIXTURES / "pytest_fail.log", tmp_path / "pytest_fail.log")
     shutil.copy(FIXTURES / "build_error.log", tmp_path / "build_error.log")
-    from hound.tui import RcaTui
+    from hound.tui import HoundTui
     from textual.widgets import Button, Input, Select
 
-    app = RcaTui(logs_dir=str(tmp_path), out_dir=str(tmp_path / "out"), offline=True)
+    app = HoundTui(logs_dir=str(tmp_path), out_dir=str(tmp_path / "out"), offline=True)
 
     async def main():
         async with app.run_test() as pilot:
@@ -1059,11 +1473,11 @@ def test_tui_workspace_results_open_with_enter(tmp_path):
     from hound.models import Triage, build_doc
     from hound.output.tickets import build_ticket
     from hound.triage.severity import classify
-    from hound.tui import RcaTui
+    from hound.tui import HoundTui
     from tests.conftest import make_artifacts
     from textual.widgets import Button, ListItem, ListView
 
-    app = RcaTui(logs_dir=str(tmp_path), out_dir=str(tmp_path / "out"), offline=True)
+    app = HoundTui(logs_dir=str(tmp_path), out_dir=str(tmp_path / "out"), offline=True)
 
     artifacts = make_artifacts("pytest_fail.log")
     rc = build_root_cause(artifacts)
@@ -1117,10 +1531,10 @@ def test_tui_workspace_results_open_with_enter(tmp_path):
 
 
 def test_tui_result_tabs_cycle_with_left_and_right_arrows(tmp_path):
-    from hound.tui import RcaTui
+    from hound.tui import HoundTui
     from textual.widgets import TabbedContent
 
-    app = RcaTui(logs_dir=str(tmp_path), out_dir=str(tmp_path / "out"), offline=True)
+    app = HoundTui(logs_dir=str(tmp_path), out_dir=str(tmp_path / "out"), offline=True)
 
     async def main():
         async with app.run_test() as pilot:
@@ -1150,7 +1564,7 @@ def test_tui_opened_results_can_navigate_previous_and_next(tmp_path):
     from hound.output.report import ensure_outdir
     from hound.output.tickets import build_ticket
     from hound.triage.severity import classify
-    from hound.tui import RcaTui
+    from hound.tui import HoundTui
     from tests.conftest import make_artifacts
     from textual.containers import Horizontal
     from textual.widgets import Button, Static
@@ -1167,7 +1581,7 @@ def test_tui_opened_results_can_navigate_previous_and_next(tmp_path):
         run_dir.mkdir(parents=True)
         (run_dir / "report.json").write_text(json.dumps(document), encoding="utf-8")
 
-    app = RcaTui(logs_dir=str(tmp_path), out_dir=str(output_dir), offline=True)
+    app = HoundTui(logs_dir=str(tmp_path), out_dir=str(output_dir), offline=True)
 
     async def main():
         async with app.run_test() as pilot:
@@ -1225,10 +1639,10 @@ def test_tui_opened_results_can_navigate_previous_and_next(tmp_path):
 
 
 def test_tui_workspace_results_selection_toggle(tmp_path):
-    from hound.tui import RcaTui
+    from hound.tui import HoundTui
     from textual.widgets import Button, ListView, Static
 
-    app = RcaTui(logs_dir=str(tmp_path), out_dir=str(tmp_path / "out"), offline=True)
+    app = HoundTui(logs_dir=str(tmp_path), out_dir=str(tmp_path / "out"), offline=True)
 
     async def main():
         async with app.run_test() as pilot:
@@ -1287,7 +1701,7 @@ def test_tui_workspace_results_selection_toggle(tmp_path):
 def test_tui_settings_save_roundtrips_before_applying(tmp_path, monkeypatch):
     from hound import tui
     from hound.preferences import load_tui_preferences, save_tui_preferences as save_preferences
-    from hound.tui import RcaTui, SettingsScreen
+    from hound.tui import HoundTui, SettingsScreen
     from textual.widgets import Button, Input
 
     keyring: dict[str, str] = {}
@@ -1299,7 +1713,7 @@ def test_tui_settings_save_roundtrips_before_applying(tmp_path, monkeypatch):
         "save_tui_preferences",
         lambda offline, provider, model, **kwargs: save_preferences(offline, provider, model, tmp_path / "tui.yml", **kwargs),
     )
-    app = RcaTui(
+    app = HoundTui(
         logs_dir=str(tmp_path), out_dir=str(tmp_path / "out"), offline=False,
         provider="openai", model="initial-model",
     )
@@ -1348,10 +1762,10 @@ def test_tui_settings_save_roundtrips_before_applying(tmp_path, monkeypatch):
 
 
 def test_tui_results_list_selection_event_opens_the_indexed_result(tmp_path):
-    from hound.tui import RcaTui
+    from hound.tui import HoundTui
     from textual.widgets import ListView
 
-    app = RcaTui(logs_dir=str(tmp_path), out_dir=str(tmp_path / "out"), offline=True)
+    app = HoundTui(logs_dir=str(tmp_path), out_dir=str(tmp_path / "out"), offline=True)
     opened: list[bool] = []
     app._open_workspace_result = lambda **_kwargs: opened.append(True)
 
@@ -1388,10 +1802,10 @@ def test_tui_results_list_selection_event_opens_the_indexed_result(tmp_path):
 
 
 def test_tui_results_workspace_filters_recent_runs(tmp_path):
-    from hound.tui import RcaTui
+    from hound.tui import HoundTui
     from textual.widgets import Input, Select
 
-    app = RcaTui(logs_dir=str(tmp_path), out_dir=str(tmp_path / "out"), offline=True)
+    app = HoundTui(logs_dir=str(tmp_path), out_dir=str(tmp_path / "out"), offline=True)
 
     async def main():
         async with app.run_test() as pilot:
@@ -1455,13 +1869,13 @@ def test_clear_managed_root_result_preserves_state_and_marker(tmp_path):
 
 def test_tui_clear_all_requires_typed_confirmation(tmp_path):
     from hound.output.report import ensure_outdir
-    from hound.tui import ClearResultsScreen, RcaTui
+    from hound.tui import ClearResultsScreen, HoundTui
     from textual.widgets import Button, Input
 
     output = ensure_outdir(tmp_path / "out")
     run = ensure_outdir(output / "run-one")
     (run / "report.json").write_text("{}", encoding="utf-8")
-    app = RcaTui(logs_dir=str(tmp_path), out_dir=str(output), offline=True)
+    app = HoundTui(logs_dir=str(tmp_path), out_dir=str(output), offline=True)
 
     async def main():
         async with app.run_test() as pilot:
@@ -1478,13 +1892,13 @@ def test_tui_clear_all_requires_typed_confirmation(tmp_path):
 
 def test_tui_clear_all_removes_indexed_results(tmp_path):
     from hound.output.report import ensure_outdir
-    from hound.tui import ClearResultsScreen, RcaTui
+    from hound.tui import ClearResultsScreen, HoundTui
     from textual.widgets import Button, Input
 
     output = ensure_outdir(tmp_path / "out")
     run = ensure_outdir(output / "run-one")
     (run / "report.json").write_text("{}", encoding="utf-8")
-    app = RcaTui(logs_dir=str(tmp_path), out_dir=str(output), offline=True)
+    app = HoundTui(logs_dir=str(tmp_path), out_dir=str(output), offline=True)
 
     async def main():
         async with app.run_test() as pilot:
@@ -1520,13 +1934,13 @@ def test_tui_clear_all_removes_indexed_results(tmp_path):
 
 def test_tui_clear_selected_removes_selected_result(tmp_path):
     from hound.output.report import ensure_outdir
-    from hound.tui import ClearResultsScreen, RcaTui
+    from hound.tui import ClearResultsScreen, HoundTui
     from textual.widgets import Button
 
     output = ensure_outdir(tmp_path / "out")
     run = ensure_outdir(output / "run-one")
     (run / "report.json").write_text("{}", encoding="utf-8")
-    app = RcaTui(logs_dir=str(tmp_path), out_dir=str(output), offline=True)
+    app = HoundTui(logs_dir=str(tmp_path), out_dir=str(output), offline=True)
 
     async def main():
         async with app.run_test() as pilot:
@@ -1573,7 +1987,7 @@ def test_run_tui_forwards_no_redact(monkeypatch):
         def run(self):
             pass
 
-    monkeypatch.setattr(hound.tui, "RcaTui", FakeApp)
+    monkeypatch.setattr(hound.tui, "HoundTui", FakeApp)
     args = Namespace(
         logs=None,
         repo=None,
@@ -1591,11 +2005,11 @@ def test_run_tui_forwards_no_redact(monkeypatch):
 
 
 def test_tui_focus_file_list_shortcut(tmp_path):
-    from hound.tui import RcaTui
+    from hound.tui import HoundTui
     from textual.widgets import ListView
 
     (tmp_path / "a.log").write_text("ERROR 1", encoding="utf-8")
-    app = RcaTui(logs_dir=str(tmp_path), out_dir=str(tmp_path / "out"), offline=True)
+    app = HoundTui(logs_dir=str(tmp_path), out_dir=str(tmp_path / "out"), offline=True)
 
     async def main():
         async with app.run_test() as pilot:
@@ -1620,15 +2034,15 @@ def test_tui_focus_file_list_shortcut(tmp_path):
 
 
 def test_tui_workspace_pagination_buttons(tmp_path, monkeypatch):
-    from hound.tui import RcaTui, PAGE_SIZE
+    from hound.tui import HoundTui, PAGE_SIZE
     from textual.widgets import Button, Static
 
     # Create enough log files to span 3 pages
     for i in range(PAGE_SIZE * 2 + 10):
         (tmp_path / f"log-{i:03d}.log").write_text(f"ERROR {i}", encoding="utf-8")
 
-    monkeypatch.setattr(RcaTui, "_log_classification", staticmethod(lambda _path: ("build", "build")))
-    app = RcaTui(logs_dir=str(tmp_path), out_dir=str(tmp_path / "out"), offline=True)
+    monkeypatch.setattr(HoundTui, "_log_classification", staticmethod(lambda _path: ("build", "build")))
+    app = HoundTui(logs_dir=str(tmp_path), out_dir=str(tmp_path / "out"), offline=True)
 
     async def main():
         async with app.run_test(size=(100, 30)) as pilot:
@@ -1679,7 +2093,7 @@ def test_run_tui_forwards_context_path(monkeypatch):
         def run(self):
             pass
 
-    monkeypatch.setattr(hound.tui, "RcaTui", FakeApp)
+    monkeypatch.setattr(hound.tui, "HoundTui", FakeApp)
     args = Namespace(
         logs=None,
         repo=None,
@@ -1699,7 +2113,7 @@ def test_run_tui_forwards_context_path(monkeypatch):
 
 def test_tui_explicit_false_empty_paths_and_one_override_saved_preferences(tmp_path, monkeypatch):
     from hound import tui
-    from hound.tui import RcaTui
+    from hound.tui import HoundTui
 
     monkeypatch.setattr(tui, "load_tui_preferences", lambda: {
         "offline": True,
@@ -1716,7 +2130,7 @@ def test_tui_explicit_false_empty_paths_and_one_override_saved_preferences(tmp_p
         "max_cost_usd": None,
     })
 
-    app = RcaTui(
+    app = HoundTui(
         logs_dir=str(tmp_path),
         out_dir=str(tmp_path / "out"),
         offline=True,
@@ -1735,14 +2149,14 @@ def test_tui_explicit_false_empty_paths_and_one_override_saved_preferences(tmp_p
 
 
 def test_tui_forwards_context_and_enrichment_to_single_analysis(tmp_path, monkeypatch):
-    from hound.tui import RcaTui
+    from hound.tui import HoundTui
 
     log = tmp_path / "failure.log"
     log.write_text("ERROR deployment failed", encoding="utf-8")
     context = tmp_path / "context.json"
     context.write_text("{}", encoding="utf-8")
     captured = {}
-    app = RcaTui(
+    app = HoundTui(
         logs_dir=str(tmp_path),
         out_dir=str(tmp_path / "out"),
         offline=True,
@@ -1804,10 +2218,10 @@ def test_tui_overview_uses_semantic_colors_for_severity_and_confidence():
 
 
 def test_tui_settings_provider_change_updates_base_url(tmp_path):
-    from hound.tui import RcaTui, SettingsScreen
+    from hound.tui import HoundTui, SettingsScreen
     from textual.widgets import Input, Select
 
-    app = RcaTui(logs_dir=str(tmp_path), out_dir=str(tmp_path / "out"), offline=True, provider="openai")
+    app = HoundTui(logs_dir=str(tmp_path), out_dir=str(tmp_path / "out"), offline=True, provider="openai")
 
     async def main():
         async with app.run_test() as pilot:
@@ -1826,7 +2240,7 @@ def test_tui_settings_connection_runs_without_blocking_ui(tmp_path, monkeypatch)
     import time
 
     from hound import tui
-    from hound.tui import RcaTui, SettingsScreen
+    from hound.tui import HoundTui, SettingsScreen
     from textual.widgets import Button, Static
 
     def discover(_base_url, _key):
@@ -1835,7 +2249,7 @@ def test_tui_settings_connection_runs_without_blocking_ui(tmp_path, monkeypatch)
 
     monkeypatch.setattr(tui, "discover_models", discover)
     monkeypatch.setattr(tui, "cache_models", lambda *_args: None)
-    app = RcaTui(logs_dir=str(tmp_path), out_dir=str(tmp_path / "out"), offline=True, provider="openai")
+    app = HoundTui(logs_dir=str(tmp_path), out_dir=str(tmp_path / "out"), offline=True, provider="openai")
 
     async def main():
         async with app.run_test() as pilot:
@@ -1861,10 +2275,10 @@ def test_tui_settings_connection_runs_without_blocking_ui(tmp_path, monkeypatch)
 
 
 def test_tui_compact_workspace_controls_do_not_overflow_horizontally(tmp_path):
-    from hound.tui import RcaTui
+    from hound.tui import HoundTui
 
     (tmp_path / "a.log").write_text("ERROR build failed", encoding="utf-8")
-    app = RcaTui(logs_dir=str(tmp_path), out_dir=str(tmp_path / "out"), offline=True)
+    app = HoundTui(logs_dir=str(tmp_path), out_dir=str(tmp_path / "out"), offline=True)
 
     async def main():
         async with app.run_test(size=(60, 20)) as pilot:
@@ -1885,9 +2299,9 @@ def test_tui_compact_workspace_controls_do_not_overflow_horizontally(tmp_path):
 
 
 def test_tui_refresh_prunes_stale_result_selection(tmp_path):
-    from hound.tui import RcaTui
+    from hound.tui import HoundTui
 
-    app = RcaTui(logs_dir=str(tmp_path), out_dir=str(tmp_path / "out"), offline=True)
+    app = HoundTui(logs_dir=str(tmp_path), out_dir=str(tmp_path / "out"), offline=True)
     stale = tmp_path / "out" / "deleted-run"
 
     async def main():
@@ -1902,12 +2316,12 @@ def test_tui_refresh_prunes_stale_result_selection(tmp_path):
 
 def test_tui_failed_analysis_clears_previous_report_and_ticket(tmp_path, monkeypatch):
     from hound import tui
-    from hound.tui import RcaTui
+    from hound.tui import HoundTui
     from textual.widgets import Static
 
     log = tmp_path / "failure.log"
     log.write_text("ERROR build failed", encoding="utf-8")
-    app = RcaTui(logs_dir=str(tmp_path), out_dir=str(tmp_path / "out"), offline=True)
+    app = HoundTui(logs_dir=str(tmp_path), out_dir=str(tmp_path / "out"), offline=True)
 
     def fail(*_args, **_kwargs):
         raise RuntimeError("provider unavailable")
@@ -1930,29 +2344,49 @@ def test_tui_failed_analysis_clears_previous_report_and_ticket(tmp_path, monkeyp
     anyio.run(main)
 
 
-def test_tui_copy_report_uses_rendered_markdown(tmp_path, monkeypatch):
-    from hound.tui import RcaTui
+def test_tui_copy_shortcut_is_scoped_to_report_and_ticket_tabs(tmp_path, monkeypatch):
+    from hound.tui import HoundTui
 
     copied = []
-    app = RcaTui(logs_dir=str(tmp_path), out_dir=str(tmp_path / "out"), offline=True)
+    app = HoundTui(logs_dir=str(tmp_path), out_dir=str(tmp_path / "out"), offline=True)
     monkeypatch.setattr(app, "copy_to_clipboard", copied.append)
 
     async def main():
-        async with app.run_test():
+        async with app.run_test() as pilot:
             app._update_markdown("#report", "# Current report")
-            app.action_copy_report()
+            app._update_markdown("#ticket", "# Current ticket")
+
+            app._show_results("pane-report")
+            await pilot.pause()
+            await pilot.press("c")
             assert copied == ["# Current report"]
+
+            app._show_results("pane-ticket")
+            await pilot.pause()
+            await pilot.press("c")
+            assert copied == ["# Current report", "# Current ticket"]
+
+            for pane in ("pane-overview", "pane-raw", "pane-context"):
+                app._show_results(pane)
+                await pilot.pause()
+                await pilot.press("c")
+            assert copied == ["# Current report", "# Current ticket"]
+
+            app._show_home()
+            await pilot.pause()
+            await pilot.press("c")
+            assert copied == ["# Current report", "# Current ticket"]
 
     anyio.run(main)
 
 
 def test_tui_stop_after_current_keeps_completed_result(tmp_path):
-    from hound.tui import RcaTui
+    from hound.tui import HoundTui
     from textual.widgets import Static
 
     log = tmp_path / "failure.log"
     log.write_text("ERROR build failed", encoding="utf-8")
-    app = RcaTui(logs_dir=str(tmp_path), out_dir=str(tmp_path / "out"), offline=True, no_dedup=True)
+    app = HoundTui(logs_dir=str(tmp_path), out_dir=str(tmp_path / "out"), offline=True, no_dedup=True)
 
     async def main():
         async with app.run_test() as pilot:
@@ -1970,11 +2404,11 @@ def test_tui_stop_after_current_keeps_completed_result(tmp_path):
 
 def test_tui_settings_connection_error_is_recoverable(tmp_path, monkeypatch):
     from hound import tui
-    from hound.tui import RcaTui, SettingsScreen
+    from hound.tui import HoundTui, SettingsScreen
     from textual.widgets import Button, Static
 
     monkeypatch.setattr(tui, "discover_models", lambda *_args: (_ for _ in ()).throw(ValueError("authentication failed")))
-    app = RcaTui(logs_dir=str(tmp_path), out_dir=str(tmp_path / "out"), offline=True, provider="openai")
+    app = HoundTui(logs_dir=str(tmp_path), out_dir=str(tmp_path / "out"), offline=True, provider="openai")
 
     async def main():
         async with app.run_test() as pilot:
@@ -1998,11 +2432,11 @@ def test_tui_settings_connection_error_is_recoverable(tmp_path, monkeypatch):
 
 def test_tui_settings_opens_when_custom_provider_registry_is_invalid(tmp_path, monkeypatch):
     from hound import tui
-    from hound.tui import RcaTui, SettingsScreen
+    from hound.tui import HoundTui, SettingsScreen
     from textual.widgets import Select
 
     monkeypatch.setattr(tui, "load_custom_providers", lambda: (_ for _ in ()).throw(ValueError("invalid registry")))
-    app = RcaTui(logs_dir=str(tmp_path), out_dir=str(tmp_path / "out"), offline=True, provider="openai")
+    app = HoundTui(logs_dir=str(tmp_path), out_dir=str(tmp_path / "out"), offline=True, provider="openai")
 
     async def main():
         async with app.run_test() as pilot:
@@ -2015,10 +2449,10 @@ def test_tui_settings_opens_when_custom_provider_registry_is_invalid(tmp_path, m
 
 
 def test_tui_home_and_settings_expose_trust_capabilities(tmp_path):
-    from hound.tui import RcaTui, SettingsScreen
+    from hound.tui import HoundTui, SettingsScreen
     from textual.widgets import Button, Static
 
-    app = RcaTui(
+    app = HoundTui(
         logs_dir=str(tmp_path),
         out_dir=str(tmp_path / "out"),
         offline=True,
@@ -2078,7 +2512,7 @@ def test_tui_context_validation_readiness_legacy_and_fork_trust(tmp_path):
     from hound.models import validate
     from hound.output.report import ensure_outdir
     from hound.pipeline import analyze
-    from hound.tui import RcaTui
+    from hound.tui import HoundTui
     from textual.widgets import Button, Static
 
     log = tmp_path / "deployment_timeline.log"
@@ -2134,7 +2568,7 @@ def test_tui_context_validation_readiness_legacy_and_fork_trust(tmp_path):
     validate(document)
     (run_dir / "report.json").write_text(json.dumps(document), encoding="utf-8")
 
-    app = RcaTui(logs_dir=str(tmp_path), out_dir=str(output), offline=True)
+    app = HoundTui(logs_dir=str(tmp_path), out_dir=str(output), offline=True)
 
     async def main():
         async with app.run_test(size=(120, 40)) as pilot:
@@ -2209,10 +2643,10 @@ def test_tui_qa_history_and_show_test_statistics(tmp_path):
     shutil.copy(FIXTURES / "junit_flaky.xml", tmp_path / "junit_flaky.xml")
     from hound.qa.history import default_history_store, upsert_results
     from hound.qa.normalize import import_artifact
-    from hound.tui import RcaTui
+    from hound.tui import HoundTui
     from textual.widgets import Button, ListView, Static
 
-    app = RcaTui(logs_dir=str(tmp_path), out_dir=str(tmp_path / "out"), offline=True)
+    app = HoundTui(logs_dir=str(tmp_path), out_dir=str(tmp_path / "out"), offline=True)
     history = default_history_store(app.out_dir)
     upsert_results(history, import_artifact(tmp_path / "junit_flaky.xml", "cli-run", "", "", ""))
 
@@ -2250,10 +2684,10 @@ def test_tui_imports_qa_history_from_workspace(tmp_path):
     import sqlite3
 
     shutil.copy(FIXTURES / "junit_flaky.xml", tmp_path / "junit_flaky.xml")
-    from hound.tui import RcaTui
+    from hound.tui import HoundTui
     from textual.widgets import Button, ListView, Static
 
-    app = RcaTui(logs_dir=str(tmp_path), out_dir=str(tmp_path / "out"), offline=True)
+    app = HoundTui(logs_dir=str(tmp_path), out_dir=str(tmp_path / "out"), offline=True)
 
     async def main():
         async with app.run_test() as pilot:
@@ -2288,10 +2722,10 @@ def test_tui_imports_qa_history_from_workspace(tmp_path):
 
 def test_tui_qa_analyze_without_history_is_explicitly_insufficient(tmp_path):
     shutil.copy(FIXTURES / "pytest_fail.log", tmp_path / "pytest_fail.log")
-    from hound.tui import RcaTui
+    from hound.tui import HoundTui
     from textual.widgets import Button, ListView, Static
 
-    app = RcaTui(logs_dir=str(tmp_path), out_dir=str(tmp_path / "out"), offline=True)
+    app = HoundTui(logs_dir=str(tmp_path), out_dir=str(tmp_path / "out"), offline=True)
 
     async def main():
         async with app.run_test() as pilot:
@@ -2332,10 +2766,10 @@ def test_tui_quality_gate_distinguishes_policy_block_from_analysis_status(tmp_pa
     policy = tmp_path / "quality.yml"
     policy.write_text("version: '1.0'\nrules:\n  new_failure: block\n", encoding="utf-8")
 
-    from hound.tui import RcaTui
+    from hound.tui import HoundTui
     from textual.widgets import Button, Input, ListView, Static
 
-    app = RcaTui(
+    app = HoundTui(
         logs_dir=str(artifacts),
         repo_dir=str(repo),
         out_dir=str(tmp_path / "out"),
@@ -2384,7 +2818,7 @@ def test_tui_quality_gate_distinguishes_policy_block_from_analysis_status(tmp_pa
 def test_tui_feedback_modal_records_review_for_loaded_run(tmp_path):
     from hound.output.report import ensure_outdir
     from hound.pipeline import analyze
-    from hound.tui import FeedbackScreen, RcaTui
+    from hound.tui import FeedbackScreen, HoundTui
     from textual.widgets import Button
 
     log = tmp_path / "pytest_fail.log"
@@ -2392,7 +2826,7 @@ def test_tui_feedback_modal_records_review_for_loaded_run(tmp_path):
     output = ensure_outdir(tmp_path / "out")
     run_dir = output / "run-one"
     analyze(log, run_dir, offline=True)
-    app = RcaTui(logs_dir=str(tmp_path), out_dir=str(output), offline=True)
+    app = HoundTui(logs_dir=str(tmp_path), out_dir=str(output), offline=True)
 
     async def main():
         async with app.run_test() as pilot:
@@ -2450,10 +2884,10 @@ def test_tui_investigation_renderer_keeps_structured_evidence_distinct():
 
 def test_tui_statusbar_single_analyze_lifecycle(tmp_path):
     shutil.copy(FIXTURES / "pytest_fail.log", tmp_path / "pytest_fail.log")
-    from hound.tui import RcaTui
+    from hound.tui import HoundTui
     from textual.widgets import Static
 
-    app = RcaTui(logs_dir=str(tmp_path), out_dir=str(tmp_path / "out"), offline=True)
+    app = HoundTui(logs_dir=str(tmp_path), out_dir=str(tmp_path / "out"), offline=True)
 
     async def main():
         async with app.run_test() as pilot:
@@ -2492,10 +2926,10 @@ def test_tui_statusbar_single_analyze_lifecycle(tmp_path):
 def test_tui_statusbar_single_analyze_failure_and_stop(tmp_path, monkeypatch):
     shutil.copy(FIXTURES / "pytest_fail.log", tmp_path / "pytest_fail.log")
     from hound import service
-    from hound.tui import RcaTui
+    from hound.tui import HoundTui
     from textual.widgets import Static
 
-    app = RcaTui(logs_dir=str(tmp_path), out_dir=str(tmp_path / "out"), offline=True)
+    app = HoundTui(logs_dir=str(tmp_path), out_dir=str(tmp_path / "out"), offline=True)
 
     async def main():
         async with app.run_test() as pilot:
@@ -2549,10 +2983,10 @@ def test_tui_statusbar_batch_analyze_lifecycle(tmp_path, monkeypatch):
     shutil.copy(FIXTURES / "pytest_fail.log", tmp_path / "pytest_fail.log")
     shutil.copy(FIXTURES / "build_error.log", tmp_path / "build_error.log")
     from hound import service
-    from hound.tui import RcaTui
+    from hound.tui import HoundTui
     from textual.widgets import Static
 
-    app = RcaTui(logs_dir=str(tmp_path), out_dir=str(tmp_path / "out"), offline=True)
+    app = HoundTui(logs_dir=str(tmp_path), out_dir=str(tmp_path / "out"), offline=True)
 
     async def main():
         async with app.run_test() as pilot:
@@ -2564,6 +2998,7 @@ def test_tui_statusbar_batch_analyze_lifecycle(tmp_path, monkeypatch):
             app.action_analyze_all()
             assert app._analyzing is True
             assert "analyzing…" in str(sb.renderable)
+            assert app.query_one("#home").display is True
 
             for _ in range(400):
                 await pilot.pause(0.02)
@@ -2571,6 +3006,7 @@ def test_tui_statusbar_batch_analyze_lifecycle(tmp_path, monkeypatch):
                     break
             assert not app._analyzing
             assert "idle" in str(sb.renderable)
+            assert app.query_one("#home").display is True
 
             # 2. Batch analysis stopped updates statusbar to idle
             app.action_analyze_all()
@@ -2617,7 +3053,7 @@ def test_tui_statusbar_batch_analyze_lifecycle(tmp_path, monkeypatch):
 def test_tui_context_validation_persistence_and_cards(tmp_path):
     from hound.output.report import ensure_outdir
     from hound.pipeline import analyze
-    from hound.tui import RcaTui
+    from hound.tui import HoundTui
     from hound.validation import default_validation_store, get_latest_validation
     from textual.widgets import Static
 
@@ -2626,7 +3062,7 @@ def test_tui_context_validation_persistence_and_cards(tmp_path):
     output = ensure_outdir(tmp_path / "out")
     run_dir = output / "run-val"
     analyze(log, run_dir, offline=True)
-    app = RcaTui(logs_dir=str(tmp_path), out_dir=str(output), offline=True)
+    app = HoundTui(logs_dir=str(tmp_path), out_dir=str(output), offline=True)
 
     async def main():
         async with app.run_test() as pilot:
@@ -2677,7 +3113,7 @@ def test_tui_context_stale_detection(tmp_path):
     import json
     from hound.output.report import ensure_outdir
     from hound.pipeline import analyze
-    from hound.tui import RcaTui
+    from hound.tui import HoundTui
     from textual.widgets import Static
 
     log = tmp_path / "pytest_fail.log"
@@ -2685,7 +3121,7 @@ def test_tui_context_stale_detection(tmp_path):
     output = ensure_outdir(tmp_path / "out")
     run_dir = output / "run-stale"
     analyze(log, run_dir, offline=True)
-    app = RcaTui(logs_dir=str(tmp_path), out_dir=str(output), offline=True)
+    app = HoundTui(logs_dir=str(tmp_path), out_dir=str(output), offline=True)
 
     async def main():
         async with app.run_test() as pilot:
@@ -2714,10 +3150,10 @@ def test_tui_context_stale_detection(tmp_path):
 
 
 def test_tui_quality_workspace_cards_and_policy_preview(tmp_path):
-    from hound.tui import RcaTui
+    from hound.tui import HoundTui
     from textual.widgets import Static
 
-    app = RcaTui(logs_dir=str(tmp_path), out_dir=str(tmp_path / "out"), offline=True)
+    app = HoundTui(logs_dir=str(tmp_path), out_dir=str(tmp_path / "out"), offline=True)
 
     async def main():
         async with app.run_test() as pilot:
@@ -2743,7 +3179,7 @@ def test_tui_feedback_modal_blocks_reviewed_on_failing_report(tmp_path):
     import json
     from hound.output.report import ensure_outdir
     from hound.pipeline import analyze
-    from hound.tui import FeedbackScreen, RcaTui
+    from hound.tui import FeedbackScreen, HoundTui
     from textual.widgets import Button, Select
 
     log = tmp_path / "pytest_fail.log"
@@ -2764,7 +3200,7 @@ def test_tui_feedback_modal_blocks_reviewed_on_failing_report(tmp_path):
     }
     report_file.write_text(json.dumps(doc), encoding="utf-8")
 
-    app = RcaTui(logs_dir=str(tmp_path), out_dir=str(output), offline=True)
+    app = HoundTui(logs_dir=str(tmp_path), out_dir=str(output), offline=True)
 
     async def main():
         async with app.run_test() as pilot:
@@ -2792,16 +3228,16 @@ def test_tui_feedback_modal_blocks_reviewed_on_failing_report(tmp_path):
 
 def test_tui_back_navigation_and_shortcuts(tmp_path):
     """Verify Back button, keyboard shortcuts, and unfocus behavior across views and modals."""
-    from hound.tui import RcaTui
+    from hound.tui import HoundTui
     from textual.widgets import Button, Static
 
-    app = RcaTui(logs_dir=str(tmp_path), out_dir=str(tmp_path / "out"), offline=True)
+    app = HoundTui(logs_dir=str(tmp_path), out_dir=str(tmp_path / "out"), offline=True)
 
     async def main():
         async with app.run_test(size=(100, 35)) as pilot:
             await pilot.pause()
             back_btn = app.query_one("#back-button", Button)
-            assert str(back_btn.label) == "<--"
+            assert str(back_btn.label).strip() == "←"
             shortcutbar = app.query_one("#shortcutbar", Static)
 
             # 1. Initial Home state
@@ -2896,10 +3332,10 @@ def test_tui_back_navigation_and_shortcuts(tmp_path):
 
 
 def test_tui_workflow_status_placement_and_stop_shortcut(tmp_path):
-    from hound.tui import RcaTui
+    from hound.tui import HoundTui
     from textual.widgets import Static
 
-    app = RcaTui(logs_dir=str(tmp_path), out_dir=str(tmp_path / "out"), offline=True)
+    app = HoundTui(logs_dir=str(tmp_path), out_dir=str(tmp_path / "out"), offline=True)
 
     async def main():
         async with app.run_test(size=(100, 35)) as pilot:
@@ -2917,6 +3353,9 @@ def test_tui_workflow_status_placement_and_stop_shortcut(tmp_path):
             # 2. Verify home keyboard guide includes stop analyze shortcut
             home_kb = str(app.query_one("#home-keyboard", Static).renderable)
             assert "stop analyze" in home_kb
+            assert "q" in home_kb
+            assert "exit" in home_kb
+            assert home_kb.count("\n") == 5
 
             # 3. Verify shortcut bar updates dynamically when analyzing
             shortcutbar = app.query_one("#shortcutbar", Static)
@@ -2948,4 +3387,3 @@ def test_tui_workflow_status_placement_and_stop_shortcut(tmp_path):
             assert "analyze" in str(shortcutbar.renderable)
 
     anyio.run(main)
-

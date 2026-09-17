@@ -21,13 +21,14 @@ from hound.pathutil import path_has_symlink
 from hound.ingest.redact import redact_text
 
 
-DEFAULT_LOG_DIR = Path(".hound") / "logs"
+DEFAULT_LOG_DIR = Path(".hound") / "captures"
 _SAFE_NAME = re.compile(r"[^A-Za-z0-9._-]+")
 _PRIVATE_KEY_BEGIN = re.compile(r"-----BEGIN (?:ENCRYPTED |RSA |EC |OPENSSH |DSA |PGP )?PRIVATE KEY-----")
 _PRIVATE_KEY_END = re.compile(r"-----END (?:ENCRYPTED |RSA |EC |OPENSSH |DSA |PGP )?PRIVATE KEY-----")
 _SECRET_FLAGS = {"--api-key", "--password", "--passwd", "--secret", "--token"}
 _INTERRUPT_GRACE_SECONDS = 3
 MAX_LINE_BYTES = 1024 * 1024
+DEFAULT_MAX_OUTPUT_BYTES = 16 * 1024 * 1024
 
 
 class CollectionInputError(ValueError):
@@ -58,6 +59,8 @@ def collect_command(
     stream: TextIO | None = None,
     raw_console: bool = False,
     timeout: float | None = None,
+    cancel_event: threading.Event | None = None,
+    max_output_bytes: int = DEFAULT_MAX_OUTPUT_BYTES,
 ) -> CollectedLog:
     """Run command without a shell, tee output, and persist a redacted log."""
     if not command:
@@ -70,14 +73,31 @@ def collect_command(
     process: subprocess.Popen[str] | None = None
     exit_code = 3
     redactor = _StreamingRedactor()
-    watchdog: threading.Timer | None = None
+    watchdog: threading.Thread | None = None
     timed_out = False
+    cancelled = False
+    output_truncated = False
+    captured_bytes = 0
 
-    def _handle_timeout() -> None:
-        nonlocal timed_out
-        timed_out = True
-        if process is not None:
-            _stop_process(process)
+    if timeout is not None and timeout <= 0:
+        raise CollectionInputError("timeout must be positive")
+    if max_output_bytes < 1:
+        raise CollectionInputError("max output bytes must be positive")
+
+    watchdog_done = threading.Event()
+
+    def _watch_process() -> None:
+        nonlocal timed_out, cancelled
+        while not watchdog_done.wait(0.05):
+            if cancel_event is not None and cancel_event.is_set():
+                cancelled = True
+            elif deadline is not None and time.perf_counter() >= deadline:
+                timed_out = True
+            else:
+                continue
+            if process is not None:
+                _stop_process(process, interrupt=cancelled)
+            return
 
     try:
         creationflags = subprocess.CREATE_NEW_PROCESS_GROUP if os.name == "nt" else 0
@@ -94,9 +114,8 @@ def collect_command(
             start_new_session=os.name != "nt",
             creationflags=creationflags,
         )
-        if timeout is not None and timeout > 0:
-            watchdog = threading.Timer(timeout, _handle_timeout)
-            watchdog.daemon = True
+        if timeout is not None or cancel_event is not None:
+            watchdog = threading.Thread(target=_watch_process, daemon=True, name="hound-command-watchdog")
             watchdog.start()
 
         with _open_log(log_file) as saved:
@@ -104,16 +123,31 @@ def collect_command(
                 raise OSError("failed to capture command output")
             for line in _bounded_lines(process.stdout):
                 redacted_line = redactor.redact(line)
-                stream.write(line if raw_console else redacted_line)
-                stream.flush()
-                saved.write(redacted_line)
-            saved.write(redactor.finish())
+                encoded_size = len(redacted_line.encode("utf-8"))
+                if captured_bytes + encoded_size <= max_output_bytes:
+                    stream.write(line if raw_console else redacted_line)
+                    stream.flush()
+                    saved.write(redacted_line)
+                    captured_bytes += encoded_size
+                elif not output_truncated:
+                    marker = "[TRUNCATED:output_limit_reached]\n"
+                    saved.write(marker)
+                    stream.write(marker)
+                    stream.flush()
+                    captured_bytes += len(marker.encode("utf-8"))
+                    output_truncated = True
+            tail = redactor.finish()
+            if tail and not output_truncated:
+                saved.write(tail)
 
         if timed_out:
             raise TimeoutError(f"command timed out after {timeout} seconds")
 
-        remaining = max(0.1, deadline - time.perf_counter()) if deadline is not None else None
-        exit_code = _normalize_exit_code(process.wait(timeout=remaining))
+        if cancelled:
+            exit_code = 130
+        else:
+            remaining = max(0.1, deadline - time.perf_counter()) if deadline is not None else None
+            exit_code = _normalize_exit_code(process.wait(timeout=remaining))
     except (TimeoutError, subprocess.TimeoutExpired):
         if process is not None:
             _stop_process(process)
@@ -129,6 +163,8 @@ def collect_command(
             log_file=log_file,
         )
         metadata["timed_out"] = True
+        metadata["output_truncated"] = output_truncated
+        metadata["captured_bytes"] = captured_bytes
         _write_metadata(metadata_file, metadata)
         collected = CollectedLog(log_file, metadata_file, exit_code, metadata)
         raise CollectionTimeoutError(
@@ -147,8 +183,9 @@ def collect_command(
         _remove_if_exists(log_file)
         raise
     finally:
-        if watchdog is not None:
-            watchdog.cancel()
+        watchdog_done.set()
+        if watchdog is not None and watchdog is not threading.current_thread():
+            watchdog.join(timeout=_INTERRUPT_GRACE_SECONDS + 1)
     metadata = _metadata(
         source="command",
         name=name or Path(command[0]).name,
@@ -159,6 +196,9 @@ def collect_command(
         cwd=Path(cwd).resolve() if cwd else Path.cwd().resolve(),
         log_file=log_file,
     )
+    metadata["cancelled"] = cancelled
+    metadata["output_truncated"] = output_truncated
+    metadata["captured_bytes"] = captured_bytes
     _write_metadata(metadata_file, metadata)
     return CollectedLog(log_file, metadata_file, exit_code, metadata)
 

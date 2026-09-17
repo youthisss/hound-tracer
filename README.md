@@ -238,6 +238,7 @@ Main keyboard controls:
 | `v` | Record feedback for the opened run |
 | `?` | Help |
 | `Escape` / `B` | Back |
+| `q` | Return to the launcher, or exit when started with `hound console` |
 | `Ctrl+C` | Quit the TUI |
 
 ### Persistent Rich CLI
@@ -246,7 +247,7 @@ Main keyboard controls:
 hound cli
 ```
 
-Inside the session, omit the executable name: enter `doctor`, `analyze . --offline`, or `runs`. `Ctrl+L` redraws the header, `Ctrl+C` cancels the current input, and `exit` or `Ctrl+D` returns to the launcher.
+Inside the session, omit the executable name: enter `doctor`, `analyze . --offline`, or `runs`. `Ctrl+L` redraws the header. `Ctrl+C` exits immediately. `exit` or `Ctrl+D` returns to the launcher when the session was opened there, or to the shell when started with `hound cli`.
 
 ### HTTP service
 
@@ -287,7 +288,7 @@ The Docker Action accepts an artifact path, repository path, output directory, a
 
 - name: Investigate failure
   if: steps.tests.outcome == 'failure'
-  uses: youthisss/hound-tracer@v0.5.2
+  uses: youthisss/hound-tracer@v0.6.0
   with:
     log: artifacts/pytest.log
     repo: ${{ github.workspace }}
@@ -765,7 +766,7 @@ src/hound/
 
 ## Project status
 
-Hound Tracer `0.5.2` is beta software. CPython 3.10, 3.11, and 3.12 are supported. The current support contract, pending platform evidence, and external release gates are maintained in [`docs/support-matrix.md`](docs/support-matrix.md). Version history follows [Semantic Versioning](https://semver.org/) and is recorded in [`CHANGELOG.md`](CHANGELOG.md).
+Hound Tracer `0.6.0` is beta software. CPython 3.10, 3.11, and 3.12 are supported. The current support contract, pending platform evidence, and external release gates are maintained in [`docs/support-matrix.md`](docs/support-matrix.md). Version history follows [Semantic Versioning](https://semver.org/) and is recorded in [`CHANGELOG.md`](CHANGELOG.md).
 
 ## License
 

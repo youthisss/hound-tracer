@@ -151,6 +151,18 @@ PROVIDERS: dict[str, dict] = {
         "supports_model_discovery": True,
         "env": {"api_key": "NINE_ROUTER_API_KEY", "model": "NINE_ROUTER_MODEL", "base_url": "NINE_ROUTER_BASE_URL"},
     },
+    "openai-oauth": {
+        "base_url": None, "default_model": "auto", "supports_model_discovery": False,
+        "env": {"model": "OPENAI_OAUTH_MODEL"},
+    },
+    "claude-oauth": {
+        "base_url": None, "default_model": "auto", "supports_model_discovery": False,
+        "env": {"model": "CLAUDE_OAUTH_MODEL"},
+    },
+    "gemini-oauth": {
+        "base_url": None, "default_model": "auto", "supports_model_discovery": False,
+        "env": {"model": "GEMINI_OAUTH_MODEL"},
+    },
     "azure": {
         "base_url": None,  # Azure needs a custom base URL, always
         "supports_model_discovery": False,
@@ -186,6 +198,7 @@ def _effective_providers() -> dict[str, dict]:
                 "default_model": definition.get("default_model", ""),
                 "models": definition.get("models", []),
                 "supports_model_discovery": definition.get("supports_model_discovery", True),
+                "protocol": definition.get("protocol", "openai"),
                 "env": {},
             }
     return providers
@@ -293,6 +306,8 @@ class Config:
     def llm_enabled(self) -> bool:
         if self.offline or not self.allow_llm:
             return False
+        if self.provider in {"openai-oauth", "claude-oauth", "gemini-oauth"}:
+            return True
         if self.api_key:
             return True
         if not self.base_url:

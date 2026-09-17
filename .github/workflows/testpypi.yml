@@ -78,7 +78,7 @@ jobs:
           echo "$expected  $wheel_file" | sha256sum --check -
           uv venv candidate-venv
           uv pip install --python candidate-venv/bin/python "$wheel_file"
-          test "$(candidate-venv/bin/hound --version)" = "Hound ${VERSION}"
+          test "$(candidate-venv/bin/hound --version)" = "Hound Tracer ${VERSION}"
           candidate-venv/bin/hound doctor --output-dir doctor-output --json
           set +e
           candidate-venv/bin/hound analyze --log tests/fixtures/pytest_fail.log --output-dir candidate-output --offline

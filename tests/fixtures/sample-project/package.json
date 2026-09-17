@@ -1,0 +1,12 @@
+{
+  "name": "hound-sample-project",
+  "private": true,
+  "scripts": {
+    "test": "python scripts/run_checks.py test",
+    "build": "python scripts/run_checks.py build",
+    "lint": "python scripts/run_checks.py lint",
+    "check": "python scripts/run_checks.py artifacts",
+    "deploy": "python scripts/run_checks.py deploy",
+    "clean": "python scripts/run_checks.py clean"
+  }
+}

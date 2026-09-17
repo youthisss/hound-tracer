@@ -33,11 +33,12 @@ def _document(*, failure: bool) -> dict:
     )
 
 
-def test_no_args_opens_tui_only_on_tty(monkeypatch):
+def test_no_args_opens_launcher_only_on_tty(monkeypatch):
     called = []
     monkeypatch.setattr(sys.stdin, "isatty", lambda: True)
     monkeypatch.setattr(sys.stdout, "isatty", lambda: True)
-    monkeypatch.setattr("hound.cli.run_tui", lambda args: called.append(args) or 0)
+    monkeypatch.setattr("hound.integrations.first_run_offer", lambda: None)
+    monkeypatch.setattr("hound.launcher.launch", lambda parser, **kwargs: called.append((parser, kwargs)) or 0)
 
     assert main([]) == 0
     assert len(called) == 1
@@ -51,6 +52,15 @@ def test_no_args_non_tty_is_actionable(monkeypatch, capsys):
     captured = capsys.readouterr()
     assert captured.out == ""
     assert "hound analyze <log-directory>" in captured.err
+
+
+def test_cli_subcommand_opens_command_line_without_launcher(monkeypatch):
+    called = []
+    monkeypatch.setattr("hound.rich_cli.run_cli", lambda args, parser, dispatch: called.append(args.command) or 0)
+    monkeypatch.setattr("hound.launcher.launch", lambda *args, **kwargs: pytest.fail("launcher should not open"))
+
+    assert main(["cli"]) == 0
+    assert called == ["cli"]
 
 
 @pytest.mark.parametrize(
@@ -132,7 +142,12 @@ def test_init_list_runs_and_clean(tmp_path, capsys):
     config = tmp_path / ".hound.yml"
     assert main(["init", "--config", str(config)]) == 0
     assert config.exists()
-    assert main(["init", "--config", str(config)]) == 2
+    assert (tmp_path / ".hound" / "artifacts").is_dir()
+    assert (tmp_path / ".hound" / "captures").is_dir()
+    assert (tmp_path / ".hound" / "runs").is_dir()
+    assert (tmp_path / ".hound" / "results").is_dir()
+    assert (tmp_path / ".hound" / "state").is_dir()
+    assert main(["init", "--config", str(config)]) == 0
     capsys.readouterr()
 
     out = tmp_path / "out"
@@ -147,6 +162,33 @@ def test_init_list_runs_and_clean(tmp_path, capsys):
     assert main(["clean", "--out", str(out)]) == 2
     assert main(["clean", "--out", str(out), "--yes"]) == 0
     assert not out.exists()
+
+
+def test_analyze_without_path_uses_initialized_workspace(tmp_path, monkeypatch, capsys):
+    monkeypatch.chdir(tmp_path)
+    assert main(["init"]) == 0
+    capsys.readouterr()
+    capture = tmp_path / ".hound" / "captures" / "failed.log"
+    capture.write_text(
+        "pytest\nFAILED tests/test_a.py::test_a - AssertionError: mismatch\n",
+        encoding="utf-8",
+    )
+
+    assert main(["analyze", "--offline"]) == 1
+    run_dirs = [path for path in (tmp_path / ".hound" / "results").iterdir() if path.name.startswith("run-")]
+    assert len(run_dirs) == 1
+
+
+def test_log_uses_initialized_capture_and_result_directories(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    assert main(["init"]) == 0
+
+    assert main([
+        "log", "--analyze", "--offline", "--",
+        sys.executable, "-c", "raise RuntimeError('boom')",
+    ]) != 0
+    assert list((tmp_path / ".hound" / "captures").glob("*.log"))
+    assert any(path.is_dir() for path in (tmp_path / ".hound" / "results").iterdir())
 
 
 def test_exit_codes_success_failure_and_internal_error(tmp_path, monkeypatch):
@@ -321,7 +363,7 @@ def test_report_reads_run_by_id(tmp_path, capsys):
 
 
 def test_tui_and_cli_use_shared_service(tmp_path, monkeypatch):
-    from hound.tui import RcaTui
+    from hound.tui import HoundTui
     from textual.widgets import ListView
 
     log = tmp_path / "run.log"
@@ -333,7 +375,7 @@ def test_tui_and_cli_use_shared_service(tmp_path, monkeypatch):
         return _document(failure=True)
 
     monkeypatch.setattr("hound.service.analyze_log", fake_analyze)
-    app = RcaTui(logs_dir=str(tmp_path), out_dir=str(tmp_path / "out"), offline=True)
+    app = HoundTui(logs_dir=str(tmp_path), out_dir=str(tmp_path / "out"), offline=True)
 
     async def exercise():
         async with app.run_test() as pilot:

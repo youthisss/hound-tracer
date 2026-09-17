@@ -244,7 +244,7 @@ jobs:
           uv venv "$smoke/venv"
           uv pip install --python "$smoke/venv/bin/python" "$wheel_url"
           cd "$smoke"
-          test "$(venv/bin/hound --version)" = "Hound ${VERSION}"
+          test "$(venv/bin/hound --version)" = "Hound Tracer ${VERSION}"
           venv/bin/hound doctor --output-dir doctor-output --json
           printf 'FAILED tests/test_candidate.py::test_candidate\nAssertionError: expected 1 but got 2\n' > failure.log
           set +e
