@@ -41,7 +41,6 @@ default and requires no outbound network access.
 | Slack delivery | Explicit webhook delivery | Redacted bounded summary; webhook secret | HTTPS validation and delivery ledger |
 | Prometheus/Tempo connector | Explicit enrichment, trusted source, configured endpoint | Bounded query identifiers; endpoint credentials | Read-only queries, timeout, response bounds, redirect block |
 | Kubernetes/Helm connector | Explicit enrichment and trusted repository | Read-only subprocess arguments and cluster credential inherited from environment | Command allowlist, trusted executable resolution, bounded output |
-| Scheduled canary | Manual/scheduled protected workflow | Sanitized fixture and protected provider secret | Separate workflow, no production logs |
 
 `--offline` prevents provider and delivery traffic. The `fork_pr` trust profile
 also disables all optional outbound paths. Hound emits no product analytics or
