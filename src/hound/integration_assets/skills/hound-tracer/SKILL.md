@@ -1,7 +1,7 @@
 ---
 name: hound-tracer
 description: Evidence-first diagnosis of CI/CD, build, test, and container failures using available harness tools, with optional Hound MCP or CLI analysis.
-version: 0.7.0
+version: 0.7.1
 license: MIT
 slash: true
 metadata:

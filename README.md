@@ -226,7 +226,7 @@ The local SQLite history store tracks outcomes, durations, branches, commits, an
 
 - name: Investigate failure
   if: steps.tests.outcome == 'failure'
-  uses: youthisss/hound-tracer@v0.7.0
+  uses: youthisss/hound-tracer@v0.7.1
   with:
     log: artifacts/pytest.log
     repo: ${{ github.workspace }}
@@ -264,7 +264,7 @@ The release image runs the main Hound process as a non-root user.
 | Persistent CLI | `hound cli` | Command completion, history, help, and repeated local work |
 | Terminal UI | `hound console` | Browse artifacts, run projects, inspect reports, and review QA history |
 | HTTP service | `hound serve` | Authenticated queued analysis behind a controlled reverse proxy |
-| GitHub Action | `uses: youthisss/hound-tracer@v0.7.0` | Failure investigation in GitHub workflows |
+| GitHub Action | `uses: youthisss/hound-tracer@v0.7.1` | Failure investigation in GitHub workflows |
 | MCP server | `hound-mcp` or `hound mcp` | Bounded diagnostic tools for coding agents |
 
 ### Terminal UI
@@ -516,7 +516,7 @@ Contributions should preserve deterministic offline behavior, default redaction,
 
 ## Project status
 
-Hound Tracer `0.7.0` is beta software. CPython 3.10, 3.11, 3.12, and 3.13 are supported. Platform evidence and external release gates are tracked in the [support matrix](docs/support-matrix.md). Releases follow [Semantic Versioning](https://semver.org/) and are recorded in the [changelog](CHANGELOG.md).
+Hound Tracer `0.7.1` is beta software. CPython 3.10, 3.11, 3.12, and 3.13 are supported. Platform evidence and external release gates are tracked in the [support matrix](docs/support-matrix.md). Releases follow [Semantic Versioning](https://semver.org/) and are recorded in the [changelog](CHANGELOG.md).
 
 ## License
 
