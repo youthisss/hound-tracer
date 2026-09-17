@@ -25,12 +25,15 @@ Hound Tracer turns raw failure evidence into a structured root-cause report, tri
 
 The analysis is advisory. Hound does not deploy, retry, or roll back infrastructure. Features that explicitly run commands, including `hound log -- <command>`, MCP command execution, and **Run project** in the TUI, execute operator-selected, checkout-controlled code with the Hound process permissions. They are not a sandbox.
 
+Use Hound when you need a repeatable investigation artifact rather than another stream of raw CI output. The offline engine is the safe baseline. Provider-backed analysis, repository source context, deployment enrichment, and external ticket delivery are separate capabilities that you enable deliberately.
+
 ## Contents
 
 - [Why Hound](#why-hound)
 - [How it works](#how-it-works)
 - [Installation](#installation)
 - [Quick start](#quick-start)
+- [Core workflow](#core-workflow)
 - [Inputs and outputs](#inputs-and-outputs)
 - [Interfaces](#interfaces)
 - [Command reference](#command-reference)
@@ -45,17 +48,17 @@ The analysis is advisory. Hound does not deploy, retry, or roll back infrastruct
 
 ## Why Hound
 
-🔎 **Evidence first.** Reports retain concrete evidence references, framed stack traces, failed tests, source locations, and uncertainty instead of returning an unsupported diagnosis.
+**Evidence first.** Reports retain concrete evidence references, framed stack traces, failed tests, source locations, and uncertainty instead of returning an unsupported diagnosis.
 
-🔒 **Private by default.** Offline mode makes no provider request. Redaction runs before supported content reaches reports, model prompts, dedup snapshots, or delivery connectors.
+**Private by default.** Offline mode makes no provider request. Redaction runs before supported content reaches reports, model prompts, dedup snapshots, or delivery connectors.
 
-🧭 **One engine, several interfaces.** The CLI, Textual TUI, HTTP service, GitHub Action, and MCP server use the same analysis pipeline and document schema.
+**One engine, several interfaces.** The CLI, Textual TUI, HTTP service, GitHub Action, and MCP server use the same analysis pipeline and document schema.
 
-📉 **Controlled model usage.** Deduplication, failure-kind routing, call limits, retry limits, concurrency limits, and USD budgets keep optional LLM use bounded.
+**Controlled model usage.** Deduplication, failure-kind routing, call limits, retry limits, concurrency limits, and USD budgets keep optional LLM use bounded.
 
-🧪 **QA beyond one failure.** Hound stores test history, detects flakiness and duration regressions, compares coverage, reads SARIF, and evaluates versioned quality-gate policies.
+**QA beyond one failure.** Hound stores test history, detects flakiness and duration regressions, compares coverage, reads SARIF, and evaluates versioned quality-gate policies.
 
-📨 **Recoverable delivery.** GitHub, Jira, GitLab, and Slack delivery uses a persistent ledger to distinguish confirmed, failed, pending, and ambiguous outcomes.
+**Recoverable delivery.** GitHub, Jira, GitLab, and Slack delivery uses a persistent ledger to distinguish confirmed, failed, pending, and ambiguous outcomes. Delivery remains opt-in.
 
 ## How it works
 
@@ -136,26 +139,45 @@ Installed entry points:
 ## Quick start
 
 ```sh
-# Open the launcher and choose TUI, persistent CLI, or HTTP server
-hound
+# Create .hound.yml and a local .hound workspace
+hound init
 
-# Check runtime, configuration, storage, Git, Docker, and kubectl readiness
+# Check Python, configuration, output storage, Git, Docker, and kubectl
 hound doctor
 
-# Analyze a directory locally with no provider request
+# Capture a command and analyze the captured evidence
+hound log --analyze --offline -- pytest -q
+
+# Or place artifacts in .hound/artifacts and analyze the workspace
+hound analyze --offline
+```
+
+`hound init` is idempotent. It keeps an existing `.hound.yml`, creates the project workspace, and configures SQLite incident state at `.hound/state/incidents.sqlite3` for initialized projects.
+
+You can also work without initializing a project:
+
+```sh
+# Analyze one file or recursively discover artifacts in a directory
+hound analyze failure.log --offline
 hound analyze ./ci-logs --offline
 
 # Add bounded source context from the current Git checkout
 hound analyze ./ci-logs --repo-dir . --source-context --offline
 
-# Capture a command and analyze its output if it fails
-hound log --analyze --offline -- pytest -q
-
-# Open the TUI directly
+# Open the interface launcher or go directly to the TUI
+hound
 hound console --logs ./ci-logs --offline
 ```
 
 For automation, always use an explicit subcommand. Running bare `hound` requires an interactive TTY.
+
+## Core workflow
+
+1. **Collect evidence.** Give Hound an existing artifact, scan a directory, pipe stdin into `hound log`, or let `hound log -- <command>` capture a process.
+2. **Choose the trust boundary.** Start with `--offline`. Enable source context, enrichment, a provider, or delivery only for evidence you trust.
+3. **Inspect the result.** Read `report.md` for the investigation, `report.json` for automation, and `ticket.md` for a reviewable issue draft.
+4. **Review before acting.** Treat the root-cause hypothesis and remediation as evidence-backed guidance, not an automatic change plan.
+5. **Build history.** Keep deduplication enabled, import test results with `hound insights import`, and record engineer feedback when you have verified the diagnosis.
 
 ## Inputs and outputs
 
@@ -174,7 +196,7 @@ Directory analysis is recursive. Dependency trees, virtual environments, VCS met
 
 ### Generated files
 
-For each analysis run, Hound writes an isolated run directory under the selected output root:
+For directory analysis, Hound writes one isolated directory per artifact under the selected output root. Single-file analysis writes directly to the selected output directory. Every Hound-managed output directory carries a `.hound-owned` marker so `hound clean` cannot remove an arbitrary directory.
 
 ```text
 hound-output/
@@ -185,12 +207,26 @@ hound-output/
 │   ├── report.md
 │   └── ticket.md
 └── .hound/
-    ├── state.sqlite3       # dedup and cached RCA state, default backend
+    ├── state.json or state.sqlite3
     ├── feedback.sqlite3
-    └── delivery.sqlite3
+    ├── history.sqlite3
+    └── deliveries.sqlite3
 ```
 
 `hound log` also creates a redacted `.log` and JSON sidecar containing sanitized command arguments, working directory, Git metadata, timestamps, duration, and exit status. Original input artifacts are never rewritten.
+
+An initialized project uses this workspace layout:
+
+```text
+.hound/
+├── artifacts/    # manually supplied input artifacts
+├── captures/     # redacted hound log captures and sidecars
+├── runs/         # TUI project-run records
+├── results/      # generated reports and ticket drafts
+└── state/        # initialized project state
+```
+
+When `.hound/` exists, `hound analyze --offline` scans the workspace while pruning generated results and state. `hound log` writes captures and analysis results into the workspace unless you override their paths.
 
 ### Analysis exit codes
 
@@ -343,6 +379,7 @@ Set `HOUND_MCP_ROOTS` to the allowed filesystem roots. Command execution is disa
 | `hound init` | Create project configuration and local Hound workspace |
 | `hound config` | Show, set non-secret values, or validate configuration |
 | `hound providers` | List built-in provider presets |
+| `hound auth` | Start an explicitly accepted subscription/OAuth login through an official provider CLI |
 | `hound models` | List or refresh a provider model catalog |
 | `hound runs` | List stored analysis runs |
 | `hound report` | Render a stored report as text, JSON, or Markdown |
@@ -354,6 +391,8 @@ Set `HOUND_MCP_ROOTS` to the allowed filesystem roots. Command execution is disa
 | `hound clean` | Remove only output trees carrying Hound ownership markers |
 
 Run `hound <command> --help` for the authoritative option list.
+
+Commands with their own action groups expose another help level, for example `hound insights --help`, `hound delivery --help`, and `hound client submit --help`.
 
 ### Common analysis examples
 
@@ -397,6 +436,8 @@ hound log --analyze --offline -- cargo test
 ```
 
 Commands run without a shell, but the executable and project hooks can still perform arbitrary actions. Captured output is redacted by default and bounded. Supplying raw-console or unredacted options weakens that protection and should be restricted to controlled evidence.
+
+`hound log` returns the wrapped command's exit code. Add `--analyze` when the captured evidence should immediately enter the analysis pipeline. Piped stdin can be captured with `--name`, but it has no child-process exit status to preserve.
 
 ### Administration
 
@@ -520,7 +561,26 @@ hound providers
 hound models --provider groq --refresh
 ```
 
+`model: auto` never triggers surprise network discovery during analysis. It resolves from a configured model, a custom-provider default, or a catalog previously cached by `hound models --refresh`. Providers that cannot expose a generic model catalog, including Anthropic and Azure, require an explicit model or deployment.
+
+Advanced users can add provider definitions to the platform-specific Hound configuration directory as `providers.yml`. Custom entries support `openai` and `anthropic` protocols, bounded model lists, a default model, and an explicit model-discovery capability. Use `hound providers --json` to inspect the effective registry without exposing credentials.
+
 If a provider fails, times out, returns an invalid schema, or reaches its retry limit, Hound records `llm_status` and `fallback_reason`, then uses deterministic RCA unless `require_llm` is enabled.
+
+### Subscription sessions through provider CLIs
+
+Hound can invoke existing Codex, Claude Code, or Gemini CLI sessions through the `openai-oauth`, `claude-oauth`, and `gemini-oauth` provider IDs. This path is separate from API-key providers and requires the matching official CLI on `PATH`.
+
+```sh
+# Read and explicitly accept Hound's account-risk notice, then start login
+hound auth login openai-oauth --accept-risk
+
+# Select the subscription provider for analysis
+hound config set provider openai-oauth
+hound analyze failure.log
+```
+
+Subscription session use may conflict with provider terms or account policies. Hound refuses this path until the risk notice has been explicitly accepted for that provider. Prefer a supported API key or local endpoint when account-policy certainty matters.
 
 ## Quality gates and test insights
 
@@ -758,8 +818,6 @@ src/hound/
 | [`docs/operations/state-recovery.md`](docs/operations/state-recovery.md) | Persistent state recovery |
 | [`docs/operations/operations-metrics.md`](docs/operations/operations-metrics.md) | Operational metrics |
 | [`docs/operations/operational-correlation.md`](docs/operations/operational-correlation.md) | Cross-signal correlation |
-| [`docs/operations/pilot-readiness.md`](docs/operations/pilot-readiness.md) | Pilot acceptance and evidence |
-| [`docs/operations/release-checklist.md`](docs/operations/release-checklist.md) | Release and publication gates |
 | [`docs/benchmarks/limits.md`](docs/benchmarks/limits.md) | Resource bounds and benchmark evidence |
 | [`CHANGELOG.md`](CHANGELOG.md) | Release history and migrations |
 | [`SECURITY.md`](SECURITY.md) | Supported versions and private disclosure |
