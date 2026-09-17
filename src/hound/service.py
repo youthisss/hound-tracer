@@ -7,6 +7,7 @@ from datetime import datetime, timezone
 import json
 import os
 from pathlib import Path
+import re
 import threading
 from uuid import uuid4
 from hound.collector import CollectionTimeoutError, CollectedLog, collect_command
@@ -36,6 +37,12 @@ STRUCTURED_ARTIFACT_HINTS = {
 }
 DEFAULT_PROJECT_TIMEOUT_SECONDS = 300.0
 MAX_PROJECT_RUN_RECORD_BYTES = 1024 * 1024
+_UNSAFE_COMMAND_TERMS = {
+    "clean", "deploy", "destroy", "drop", "migrate", "migration", "prod",
+    "production", "publish", "release", "remove", "reset", "rm", "rollback",
+}
+_SAFE_PACKAGE_SCRIPTS = {"build", "check", "lint", "test", "typecheck", "type-check", "verify"}
+_MAX_MANIFEST_BYTES = 2 * 1024 * 1024
 
 
 class AnalysisInputError(ValueError):
@@ -134,6 +141,68 @@ def execute_project_run(request: ProjectRunRequest, *, cancel_event: threading.E
         raise ValueError("project run directory must not contain symlinks")
     atomic_write(request.runs_directory / f"{run_id}.json", json.dumps(record, indent=2, ensure_ascii=False))
     return ProjectRunResult(request, collected, record, error)
+
+
+def discover_project_commands(root: str | Path) -> list[tuple[str, list[str]]]:
+    """Return bounded, non-mutating command suggestions from project manifests."""
+    directory = Path(root).expanduser().resolve()
+    if not directory.is_dir() or directory.is_symlink() or path_has_symlink(directory):
+        raise ValueError("project directory must be an existing non-symlink directory")
+    suggestions: list[tuple[str, list[str]]] = []
+
+    def suggestible(parts: list[str]) -> bool:
+        words = {word.lower() for part in parts for word in re.findall(r"[A-Za-z0-9_-]+", part)}
+        return not bool(words & _UNSAFE_COMMAND_TERMS)
+
+    def add(label: str, command: list[str]) -> None:
+        if suggestible(command) and command not in [item[1] for item in suggestions]:
+            suggestions.append((label, command))
+
+    package = directory / "package.json"
+    if package.is_file() and not package.is_symlink():
+        try:
+            data = json.loads(read_bounded_text(package, _MAX_MANIFEST_BYTES, encoding="utf-8"))
+            scripts = data.get("scripts", {}) if isinstance(data, dict) else {}
+            if isinstance(scripts, dict):
+                runner = "npm.cmd" if os.name == "nt" else "npm"
+                for name, body in scripts.items():
+                    if isinstance(name, str) and isinstance(body, str) and name.lower() in _SAFE_PACKAGE_SCRIPTS and suggestible([body]):
+                        add(f"npm {name}", [runner, "run", name])
+        except (OSError, ValueError):
+            pass
+    pyproject = directory / "pyproject.toml"
+    if pyproject.is_file() and not pyproject.is_symlink():
+        try:
+            if "pytest" in read_bounded_text(pyproject, _MAX_MANIFEST_BYTES, encoding="utf-8").lower():
+                add("pytest", ["pytest", "-q"])
+        except (OSError, ValueError):
+            pass
+    if (directory / "Cargo.toml").is_file():
+        add("cargo test", ["cargo", "test"])
+        add("cargo build", ["cargo", "build"])
+    if (directory / "go.mod").is_file():
+        add("go test", ["go", "test", "./..."])
+    if (directory / "pom.xml").is_file():
+        runner = "mvn.cmd" if os.name == "nt" else "mvn"
+        add("mvn test", [runner, "test"])
+        add("mvn package", [runner, "package"])
+    if (directory / "gradlew").is_file() or (directory / "gradlew.bat").is_file():
+        wrapper = "gradlew.bat" if os.name == "nt" else "./gradlew"
+        add("gradle test", [wrapper, "test"])
+        add("gradle build", [wrapper, "build"])
+    makefile = directory / "Makefile"
+    if makefile.is_file() and not makefile.is_symlink():
+        try:
+            text = read_bounded_text(makefile, _MAX_MANIFEST_BYTES, encoding="utf-8")
+            targets = {
+                match.group(1) for line in text.splitlines()
+                if (match := re.match(r"^([A-Za-z0-9_.-]+)\s*:(?![=])", line))
+            }
+            for target in sorted(targets & _SAFE_PACKAGE_SCRIPTS):
+                add(f"make {target}", ["make", target])
+        except (OSError, ValueError):
+            pass
+    return suggestions[:6]
 
 
 def load_project_runs(directory: Path) -> tuple[list[dict], list[str]]:

@@ -324,6 +324,7 @@ The [engine surface matrix](docs/reference/engine-surface.md) shows what is expo
 | `hound analyze` | Analyze one artifact or recursively analyze a directory |
 | `hound batch` | Process artifacts with shared call and cost budgets |
 | `hound log` | Capture a command or piped stdin and optionally analyze it |
+| `hound run` | Run a project command with bounded capture, artifact discovery, and a persistent run record |
 | `hound console` | Open the Textual terminal UI |
 | `hound cli` | Open the persistent Rich command session |
 | `hound gate` | Evaluate tests, coverage, changed lines, and SARIF |
@@ -341,6 +342,17 @@ The [engine surface matrix](docs/reference/engine-surface.md) shows what is expo
 | `hound clean` | Remove only Hound-owned output trees |
 
 Run `hound <command> --help` for the authoritative options.
+
+`hound run` exposes the project-run engine used by the TUI:
+
+```sh
+hound run --detect
+hound run -- pytest -q
+hound run --directory ./backend --timeout 600 -- npm test
+hound run --analyze --offline -- cargo test
+```
+
+It runs without a shell, preserves the child exit code, applies bounded redacted capture and process-tree cancellation, and writes each record atomically under `.hound/runs/`. The default timeout is five minutes; the maximum is one hour.
 
 </details>
 
@@ -368,7 +380,7 @@ Directory analysis is recursive. Hound prunes dependency trees, virtual environm
 | `2` | Invalid arguments, configuration, or input |
 | `3` | Internal execution, I/O, or required delivery failure |
 
-`hound log` normally preserves the wrapped command's exit code. A timeout uses `124`; cancellation uses `130`. Quality-gate exit codes are documented in [architecture](docs/architecture.md#qa-quality-gate).
+`hound log` and `hound run` normally preserve the wrapped command's exit code. A timeout uses `124`; cancellation uses `130`. Quality-gate exit codes are documented in [architecture](docs/architecture.md#qa-quality-gate).
 
 ### Supported failure areas
 

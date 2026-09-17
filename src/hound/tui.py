@@ -7038,83 +7038,8 @@ def clear_managed_results(output_root: Path, run_dirs: list[Path]) -> tuple[int,
         except (OSError, ValueError):
             failed += 1
     return cleared, failed
-# Manifest discovery offers convenience suggestions, not a safety judgment.
-# Package hooks, plugins, and build scripts remain checkout-controlled code.
-_UNSAFE_COMMAND_TERMS = {
-    "clean", "deploy", "destroy", "drop", "migrate", "migration", "prod",
-    "production", "publish", "release", "remove", "reset", "rm", "rollback",
-}
-_SAFE_PACKAGE_SCRIPTS = {"build", "check", "lint", "test", "typecheck", "type-check", "verify"}
-_MAX_MANIFEST_BYTES = 2 * 1024 * 1024
-
-
-def _command_is_suggestible(parts: list[str]) -> bool:
-    words = {word.lower() for part in parts for word in re.findall(r"[A-Za-z0-9_-]+", part)}
-    return not bool(words & _UNSAFE_COMMAND_TERMS)
-
-
 def _discover_project_commands(root: Path) -> list[tuple[str, list[str]]]:
-    """Return bounded command suggestions from project manifests."""
-    suggestions: list[tuple[str, list[str]]] = []
-
-    def add(label: str, command: list[str]) -> None:
-        if _command_is_suggestible(command) and command not in [item[1] for item in suggestions]:
-            suggestions.append((label, command))
-
-    package = root / "package.json"
-    if package.is_file() and not package.is_symlink():
-        try:
-            data = _json.loads(read_bounded_text(package, _MAX_MANIFEST_BYTES, encoding="utf-8"))
-            scripts = data.get("scripts", {}) if isinstance(data, dict) else {}
-            if isinstance(scripts, dict):
-                runner = "npm.cmd" if os.name == "nt" else "npm"
-                for name, body in scripts.items():
-                    if (
-                        isinstance(name, str)
-                        and isinstance(body, str)
-                        and name.lower() in _SAFE_PACKAGE_SCRIPTS
-                        and _command_is_suggestible([body])
-                    ):
-                        add(f"npm {name}", [runner, "run", name])
-        except (OSError, ValueError):
-            pass
-
-    pyproject = root / "pyproject.toml"
-    if pyproject.is_file() and not pyproject.is_symlink():
-        try:
-            text = read_bounded_text(pyproject, _MAX_MANIFEST_BYTES, encoding="utf-8").lower()
-            if "pytest" in text:
-                add("pytest", ["pytest", "-q"])
-        except (OSError, ValueError):
-            pass
-
-    if (root / "Cargo.toml").is_file():
-        add("cargo test", ["cargo", "test"])
-        add("cargo build", ["cargo", "build"])
-    if (root / "go.mod").is_file():
-        add("go test", ["go", "test", "./..."])
-    if (root / "pom.xml").is_file():
-        add("mvn test", ["mvn.cmd" if os.name == "nt" else "mvn", "test"])
-        add("mvn package", ["mvn.cmd" if os.name == "nt" else "mvn", "package"])
-    if (root / "gradlew").is_file() or (root / "gradlew.bat").is_file():
-        wrapper = "gradlew.bat" if os.name == "nt" else "./gradlew"
-        add("gradle test", [wrapper, "test"])
-        add("gradle build", [wrapper, "build"])
-
-    makefile = root / "Makefile"
-    if makefile.is_file() and not makefile.is_symlink():
-        try:
-            text = read_bounded_text(makefile, _MAX_MANIFEST_BYTES, encoding="utf-8")
-            targets = {
-                match.group(1)
-                for line in text.splitlines()
-                if (match := re.match(r"^([A-Za-z0-9_.-]+)\s*:(?![=])", line))
-            }
-            for target in sorted(targets & _SAFE_PACKAGE_SCRIPTS):
-                add(f"make {target}", ["make", target])
-        except (OSError, ValueError):
-            pass
-    return suggestions[:6]
+    return service.discover_project_commands(root)
 
 
 RcaTui = HoundTui

@@ -528,6 +528,38 @@ def build_parser() -> argparse.ArgumentParser:
     uninstall_cmd.add_argument("--purge-user-data", action="store_true", help="remove Hound user configuration and model cache")
     uninstall_cmd.add_argument("--dry-run", action="store_true", help="show actions without changing files")
     uninstall_cmd.add_argument("--yes", action="store_true", help="confirm package removal and requested data deletion")
+    run_cmd = sub.add_parser(
+        "run",
+        help="run a project command with bounded capture and artifact discovery",
+        epilog="examples: hound run -- pytest -q | hound run --directory backend -- npm test",
+    )
+    run_cmd.add_argument("--directory", default=".", help="project working directory (default: current directory)")
+    run_cmd.add_argument("--timeout", type=_positive_float, default=service.DEFAULT_PROJECT_TIMEOUT_SECONDS,
+                         help="command timeout in seconds (default: 300; maximum: 3600)")
+    run_cmd.add_argument("--detect", action="store_true", help="list suggested project commands without running them")
+    run_cmd.add_argument("--json", action="store_true", help="output the run record as JSON")
+    run_cmd.add_argument("--analyze", action="store_true", help="analyze the captured log after the command finishes")
+    run_cmd.add_argument("--output-dir", dest="out", default=None,
+                         help="analysis output directory (default: .hound/results under the project)")
+    run_cmd.add_argument("--offline", action="store_true", help="use local analysis when --analyze is set")
+    run_cmd.add_argument("--config", default=None, help="optional YAML config used with --analyze")
+    run_cmd.add_argument("--no-dedup", action="store_true", help="disable dedup state persistence with --analyze")
+    run_cmd.add_argument("--allow-unredacted", dest="no_redact", action="store_true", help="disable redaction (unsafe)")
+    run_cmd.add_argument("--source-context", action="store_true", help="attach repository source near log frames")
+    run_cmd.add_argument("--source-class", choices=sorted(SOURCE_CLASSES), default=None)
+    _add_llm_args(run_cmd)
+    run_cmd.add_argument("command_args", nargs=argparse.REMAINDER, metavar="COMMAND")
+    integrations_cmd = sub.add_parser("integrations", help="install Hound skills and MCP configuration for coding harnesses")
+    integrations_sub = integrations_cmd.add_subparsers(dest="integrations_command", required=True)
+    integrations_detect = integrations_sub.add_parser("detect", help="show coding harnesses found on this machine")
+    integrations_detect.add_argument("--json", action="store_true", help="output JSON")
+    integrations_install = integrations_sub.add_parser("install", help="install integrations after explicit confirmation")
+    integrations_install.add_argument("harnesses", nargs="*", metavar="HARNESS")
+    integrations_install.add_argument("--detect", action="store_true", help="target every detected harness")
+    integrations_install.add_argument("--scope", choices=("global", "project"), default="global")
+    integrations_install.add_argument("--dry-run", action="store_true", help="show files without writing them")
+    integrations_install.add_argument("--yes", action="store_true", help="skip the confirmation prompt")
+    integrations_install.add_argument("--json", action="store_true", help="output JSON")
     sub.add_parser(
         "mcp",
         help="run the Model Context Protocol (stdio) service for AI coding agents",
@@ -1388,6 +1420,81 @@ def run_init(args: argparse.Namespace) -> int:
         print("next: hound log --analyze --offline -- <command>")
         print("      hound analyze --offline")
     return 0
+
+
+def run_project(args: argparse.Namespace) -> int:
+    directory = Path(args.directory).expanduser()
+    if args.detect:
+        if args.command_args:
+            print("error: --detect cannot be combined with a command", file=sys.stderr)
+            return 2
+        try:
+            suggestions = service.discover_project_commands(directory)
+        except ValueError as exc:
+            print(f"error: {exc}", file=sys.stderr)
+            return 2
+        if args.json:
+            print(json.dumps([{"label": label, "command": command} for label, command in suggestions], indent=2))
+        else:
+            for label, command in suggestions:
+                print(f"{label}: {' '.join(command)}")
+        return 0
+    command = list(args.command_args)
+    if command and command[0] == "--":
+        command = command[1:]
+    if not command:
+        print("error: run requires a command after --, or use --detect", file=sys.stderr)
+        return 2
+    try:
+        request = service.prepare_project_run(command, directory, timeout=args.timeout)
+    except ValueError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 2
+    try:
+        result = service.execute_project_run(request)
+    except (CollectionInputError, OSError, ValueError) as exc:
+        print(f"error: project command failed: {exc}", file=sys.stderr)
+        return 3
+    if args.json:
+        print(json.dumps(result.record, indent=2, ensure_ascii=False))
+    else:
+        print(f"status   : {result.record['status']}")
+        print(f"exit code: {result.record['exit_code']}")
+        print(f"duration : {result.record['duration_ms'] / 1000:.1f}s")
+        print(f"capture  : {result.record['capture']}")
+        print(f"record   : {request.runs_directory / (result.record['run_id'] + '.json')}")
+        if result.record["artifacts"]:
+            print("artifacts:")
+            for artifact in result.record["artifacts"]:
+                print(f"  {artifact}")
+    if result.error:
+        print(f"warning: {result.error}", file=sys.stderr)
+    if args.analyze:
+        output = Path(args.out).expanduser() if args.out else request.cwd / WORKSPACE_RESULTS
+        try:
+            service.analyze_log(
+                result.collected.log_file,
+                output,
+                repo_dir=request.cwd,
+                offline=args.offline,
+                config_path=args.config,
+                no_dedup=args.no_dedup,
+                provider=args.provider,
+                model=args.model,
+                base_url=args.base_url,
+                api_key=args.api_key,
+                redact=False if args.no_redact else None,
+                max_retries=args.max_retries,
+                source_context=args.source_context,
+                source_class=args.source_class,
+                require_llm=args.require_llm or None,
+            )
+        except (service.AnalysisInputError, OSError, ValueError) as exc:
+            print(f"error: analysis failed: {exc}", file=sys.stderr)
+            return 3
+        if not args.json:
+            print(f"analysis : {output / 'report.json'}")
+    return int(result.collected.exit_code)
 
 
 def run_log(args: argparse.Namespace) -> int:
@@ -2344,6 +2451,8 @@ def _dispatch(args: argparse.Namespace, parser: argparse.ArgumentParser) -> int:
         return run_doctor(args)
     if args.command == "log":
         return run_log(args)
+    if args.command == "run":
+        return run_project(args)
     if args.command == "mcp":
         return run_mcp(args)
     if args.command == "install":
