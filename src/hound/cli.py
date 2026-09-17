@@ -516,6 +516,10 @@ def build_parser() -> argparse.ArgumentParser:
     integrations_install.add_argument("harnesses", nargs="*", metavar="HARNESS")
     integrations_install.add_argument("--detect", action="store_true", help="target every detected harness")
     integrations_install.add_argument("--scope", choices=("global", "project"), default="global")
+    integrations_install.add_argument(
+        "--component", choices=("skill", "plugin", "mcp"), action="append", dest="components",
+        help="install only this component; repeat to select multiple (default: all)",
+    )
     integrations_install.add_argument("--dry-run", action="store_true", help="show files without writing them")
     integrations_install.add_argument("--yes", action="store_true", help="skip the confirmation prompt")
     integrations_install.add_argument("--json", action="store_true", help="output JSON")
@@ -523,6 +527,10 @@ def build_parser() -> argparse.ArgumentParser:
     integrations_uninstall.add_argument("harnesses", nargs="*", metavar="HARNESS")
     integrations_uninstall.add_argument("--detect", action="store_true", help="target every detected harness")
     integrations_uninstall.add_argument("--scope", choices=("global", "project"), default="global")
+    integrations_uninstall.add_argument(
+        "--component", choices=("skill", "plugin", "mcp"), action="append", dest="components",
+        help="remove only this component; repeat to select multiple (default: all)",
+    )
     integrations_uninstall.add_argument("--dry-run", action="store_true", help="show removals without changing files")
     integrations_uninstall.add_argument("--yes", action="store_true", help="skip the confirmation prompt")
     integrations_uninstall.add_argument("--json", action="store_true", help="output JSON")
@@ -2187,7 +2195,13 @@ def run_integrations(args: argparse.Namespace) -> int:
             print("No changes made.")
             return 0
     operation = uninstall_integrations if args.integrations_command == "uninstall" else install_integrations
-    results = operation(harnesses, scope=args.scope, root=Path.cwd(), dry_run=args.dry_run)
+    results = operation(
+        harnesses,
+        scope=args.scope,
+        root=Path.cwd(),
+        dry_run=args.dry_run,
+        components=set(args.components or ("skill", "plugin", "mcp")),
+    )
     return print_results(
         results,
         as_json=args.json,

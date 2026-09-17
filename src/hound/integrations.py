@@ -15,6 +15,7 @@ import yaml
 
 
 SUPPORTED_HARNESSES = ("opencode", "claude", "codex", "cursor", "hermes", "antigravity")
+SUPPORTED_COMPONENTS = frozenset({"skill", "plugin", "mcp"})
 
 
 @dataclass(frozen=True)
@@ -244,8 +245,10 @@ def _copy_asset_tree(source: Any, destination: Path, *, dry_run: bool) -> list[s
     return changed
 
 
-def _install_opencode(scope: str, root: Path, dry_run: bool) -> tuple[list[str], list[str]]:
-    changed = _install_skill("opencode", scope, root, dry_run)
+def _install_opencode(scope: str, root: Path, dry_run: bool, components: set[str]) -> tuple[list[str], list[str]]:
+    changed = _install_skill("opencode", scope, root, dry_run) if "skill" in components else []
+    if "mcp" not in components:
+        return changed, []
     config = (root / ".opencode" / "opencode.jsonc") if scope == "project" else (_home() / ".config" / "opencode" / "opencode.jsonc")
     fragment = {
         "$schema": "https://opencode.ai/config.json",
@@ -258,12 +261,17 @@ def _install_opencode(scope: str, root: Path, dry_run: bool) -> tuple[list[str],
     return changed, warnings
 
 
-def _install_json_mcp(harness: str, scope: str, root: Path, dry_run: bool) -> tuple[list[str], list[str]]:
-    changed = _install_skill(harness, scope, root, dry_run)
+def _install_json_mcp(
+    harness: str, scope: str, root: Path, dry_run: bool, components: set[str]
+) -> tuple[list[str], list[str]]:
+    changed = _install_skill(harness, scope, root, dry_run) if "skill" in components else []
     warnings: list[str] = []
-    if harness == "claude":
+    if harness == "claude" and "plugin" in components:
         plugin_dir = (root / ".claude" / "plugins" / "hound") if scope == "project" else (_home() / ".claude" / "plugins" / "hound")
         changed.extend(_copy_asset_tree(_asset("plugins", "hound"), plugin_dir, dry_run=dry_run))
+    if "mcp" not in components:
+        return changed, warnings
+    if harness == "claude":
         config = (root / ".mcp.json") if scope == "project" else (_home() / ".claude.json")
     elif harness == "cursor":
         config = (root / ".cursor" / "mcp.json") if scope == "project" else (_home() / ".cursor" / "mcp.json")
@@ -332,7 +340,14 @@ def _merge_hermes_config(path: Path, *, dry_run: bool) -> tuple[bool, Path | Non
     return True, backup
 
 
-def install_integrations(harnesses: list[str], *, scope: str, root: Path, dry_run: bool = False) -> list[IntegrationResult]:
+def install_integrations(
+    harnesses: list[str], *, scope: str, root: Path, dry_run: bool = False,
+    components: set[str] | None = None,
+) -> list[IntegrationResult]:
+    components = set(SUPPORTED_COMPONENTS if components is None else components)
+    unsupported_components = components - SUPPORTED_COMPONENTS
+    if unsupported_components:
+        raise ValueError(f"unsupported component: {', '.join(sorted(unsupported_components))}")
     detected = detect_harnesses()
     results: list[IntegrationResult] = []
     for harness in harnesses:
@@ -340,9 +355,9 @@ def install_integrations(harnesses: list[str], *, scope: str, root: Path, dry_ru
             raise ValueError(f"unsupported harness: {harness}")
         try:
             if harness == "opencode":
-                changed, warnings = _install_opencode(scope, root, dry_run)
+                changed, warnings = _install_opencode(scope, root, dry_run, components)
             else:
-                changed, warnings = _install_json_mcp(harness, scope, root, dry_run)
+                changed, warnings = _install_json_mcp(harness, scope, root, dry_run, components)
             results.append(IntegrationResult(harness, detected[harness], not dry_run, changed, warnings))
         except (OSError, ValueError, json.JSONDecodeError) as exc:
             results.append(IntegrationResult(harness, detected[harness], False, [], [str(exc)]))
@@ -437,7 +452,14 @@ def _uninstall_hermes(scope: str, root: Path, dry_run: bool) -> tuple[list[str],
     return [str(path)], [f"Backup created: {backup}"] if backup else []
 
 
-def uninstall_integrations(harnesses: list[str], *, scope: str, root: Path, dry_run: bool = False) -> list[IntegrationResult]:
+def uninstall_integrations(
+    harnesses: list[str], *, scope: str, root: Path, dry_run: bool = False,
+    components: set[str] | None = None,
+) -> list[IntegrationResult]:
+    components = set(SUPPORTED_COMPONENTS if components is None else components)
+    unsupported_components = components - SUPPORTED_COMPONENTS
+    if unsupported_components:
+        raise ValueError(f"unsupported component: {', '.join(sorted(unsupported_components))}")
     detected = detect_harnesses()
     results: list[IntegrationResult] = []
     for harness in harnesses:
@@ -446,10 +468,13 @@ def uninstall_integrations(harnesses: list[str], *, scope: str, root: Path, dry_
         changed: list[str] = []
         warnings: list[str] = []
         try:
-            skill_dir = _skill_directory(harness, scope, root)
-            if _remove_path(skill_dir, dry_run=dry_run):
-                changed.append(str(skill_dir))
-            if harness == "codex":
+            if "skill" in components:
+                skill_dir = _skill_directory(harness, scope, root)
+                if _remove_path(skill_dir, dry_run=dry_run):
+                    changed.append(str(skill_dir))
+            if "mcp" not in components:
+                config_changed, config_warnings = [], []
+            elif harness == "codex":
                 config_changed, config_warnings = _uninstall_codex(scope, root, dry_run)
             elif harness == "hermes":
                 config_changed, config_warnings = _uninstall_hermes(scope, root, dry_run)
@@ -457,14 +482,14 @@ def uninstall_integrations(harnesses: list[str], *, scope: str, root: Path, dry_
                 config_changed, config_warnings = _uninstall_json_config(harness, scope, root, dry_run)
             changed.extend(config_changed)
             warnings.extend(config_warnings)
-            if harness == "claude":
+            if harness == "claude" and "plugin" in components:
                 plugin_dir = (root / ".claude" / "plugins" / "hound") if scope == "project" else (_home() / ".claude" / "plugins" / "hound")
                 if _remove_path(plugin_dir, dry_run=dry_run):
                     changed.append(str(plugin_dir))
             results.append(IntegrationResult(harness, detected[harness], not dry_run, changed, warnings))
         except (OSError, ValueError, json.JSONDecodeError, yaml.YAMLError) as exc:
             results.append(IntegrationResult(harness, detected[harness], False, changed, warnings + [str(exc)]))
-    if not dry_run and _manifest_path().exists():
+    if not dry_run and components == SUPPORTED_COMPONENTS and _manifest_path().exists():
         _manifest_path().unlink()
     return results
 

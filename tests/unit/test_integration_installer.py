@@ -137,6 +137,46 @@ def test_integrations_uninstall_dry_run_keeps_files(tmp_path, monkeypatch):
     assert "hound" in json.loads((home / ".config" / "opencode" / "opencode.jsonc").read_text(encoding="utf-8"))["mcp"]["servers"]
 
 
+def test_install_can_select_individual_components(tmp_path, monkeypatch):
+    home = _use_home(monkeypatch, tmp_path)
+
+    integrations.install_integrations(["claude"], scope="global", root=tmp_path, components={"skill"})
+    assert (home / ".claude" / "skills" / "hound-tracer" / "SKILL.md").is_file()
+    assert not (home / ".claude" / "plugins" / "hound").exists()
+    assert not (home / ".claude.json").exists()
+
+    integrations.install_integrations(["claude"], scope="global", root=tmp_path, components={"plugin"})
+    assert (home / ".claude" / "plugins" / "hound" / "plugin.json").is_file()
+    assert not (home / ".claude.json").exists()
+
+    integrations.install_integrations(["claude"], scope="global", root=tmp_path, components={"mcp"})
+    assert json.loads((home / ".claude.json").read_text(encoding="utf-8"))["mcpServers"]["hound"]["command"] == "hound-mcp"
+
+
+def test_selective_uninstall_removes_only_requested_component(tmp_path, monkeypatch):
+    home = _use_home(monkeypatch, tmp_path)
+    integrations.install_integrations(["claude"], scope="global", root=tmp_path)
+
+    integrations.uninstall_integrations(["claude"], scope="global", root=tmp_path, components={"plugin"})
+
+    assert not (home / ".claude" / "plugins" / "hound").exists()
+    assert (home / ".claude" / "skills" / "hound-tracer" / "SKILL.md").is_file()
+    assert "hound" in json.loads((home / ".claude.json").read_text(encoding="utf-8"))["mcpServers"]
+
+
+def test_integrations_cli_accepts_repeated_component_options(tmp_path, monkeypatch):
+    home = _use_home(monkeypatch, tmp_path)
+    monkeypatch.chdir(tmp_path)
+
+    assert main([
+        "integrations", "install", "claude", "--scope", "global", "--yes",
+        "--component", "skill", "--component", "mcp",
+    ]) == 0
+    assert (home / ".claude" / "skills" / "hound-tracer" / "SKILL.md").is_file()
+    assert (home / ".claude.json").is_file()
+    assert not (home / ".claude" / "plugins" / "hound").exists()
+
+
 def test_uninstall_cli_dry_run_does_not_invoke_package_manager(tmp_path, monkeypatch, capsys):
     monkeypatch.chdir(tmp_path)
     (tmp_path / ".hound").mkdir()

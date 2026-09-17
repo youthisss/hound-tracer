@@ -661,7 +661,23 @@ hound integrations install --help
 hound integrations uninstall --detect --dry-run
 ```
 
-Installation and removal require explicit confirmation. Integration removal deletes Hound-owned skills and configuration entries while preserving unrelated harness configuration. The examples under [`integrations/`](integrations/) must be merged into the target harness configuration; [`plugins/hound/plugin.json`](plugins/hound/plugin.json) is a reference bundle, not a universal plugin format. The packaged agent workflow lives at [`skills/hound-tracer/SKILL.md`](skills/hound-tracer/SKILL.md).
+Without component options, installation includes every supported component: skill, plugin, and MCP. Use one or more `--component` options for a selective installation:
+
+```sh
+# Skill only
+hound integrations install claude --component skill --yes
+
+# Plugin only (currently supported by Claude)
+hound integrations install claude --component plugin --yes
+
+# MCP only
+hound integrations install opencode --component mcp --yes
+
+# Skill and MCP, without a plugin
+hound integrations install claude --component skill --component mcp --yes
+```
+
+Installation and removal require explicit confirmation. Selective removal uses the same repeatable `--component` option. Integration removal deletes Hound-owned assets and configuration entries while preserving unrelated harness configuration. The examples under [`integrations/`](integrations/) must be merged into the target harness configuration; [`plugins/hound/plugin.json`](plugins/hound/plugin.json) is a reference bundle, not a universal plugin format. The packaged agent workflow lives at [`skills/hound-tracer/SKILL.md`](skills/hound-tracer/SKILL.md).
 
 ### Uninstall
 
