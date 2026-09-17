@@ -2,8 +2,10 @@
 from __future__ import annotations
 
 import os
+import json
 from pathlib import Path
 import shlex
+import sys
 from typing import Any
 
 DIRECT_RUNNERS = {"pytest", "jest", "vitest", "ctest", "cargo-test"}
@@ -63,10 +65,12 @@ def on_post_execution(context: dict[str, Any]) -> dict[str, Any] | None:
     """Invoked by coding agent harnesses after a terminal command finishes."""
     command = context.get("command", "")
     exit_code = context.get("exit_code", 0)
+    if not isinstance(command, str) or not isinstance(exit_code, int) or isinstance(exit_code, bool):
+        return None
 
     if exit_code != 0 and _is_test_command(command):
         suggestion = (
-            f"[Hound Tracer] Test command '{command}' exited with code {exit_code}.\n"
+            f"[Hound Tracer] Test/build command exited with code {exit_code}.\n"
             "Tip: You can use `/hound:analyze` or `hound analyze <log> --offline` "
             "to extract root cause, scrubbed stacktraces, and fix recommendations without token waste."
         )
@@ -80,8 +84,10 @@ def on_post_execution(context: dict[str, Any]) -> dict[str, Any] | None:
 
 
 if __name__ == "__main__":
-    # Can also be executed standalone to test
-    sample_ctx = {"command": "pytest tests/", "exit_code": 1}
-    result = on_post_execution(sample_ctx)
+    try:
+        context = json.load(sys.stdin)
+    except (ValueError, OSError):
+        context = {}
+    result = on_post_execution(context) if isinstance(context, dict) else None
     if result:
-        print(result["suggestion"])
+        print(json.dumps(result))

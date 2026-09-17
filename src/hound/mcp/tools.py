@@ -10,8 +10,10 @@ Every tool maps directly (1:1) to Hound Tracer's core modules:
 """
 from __future__ import annotations
 
+import json
 import shutil
 import sys
+import time
 from pathlib import Path
 from typing import Any
 
@@ -62,6 +64,9 @@ def tool_analyze(
     source_context: bool = False,
     enrich: bool = False,
     repo_dir: str | None = None,
+    context_path: str | None = None,
+    config_path: str | None = None,
+    max_artifacts: int = 100,
 ) -> dict[str, Any]:
     """Analyze one or more failure artifacts (.log, .xml, .sarif, .json) with secret redaction."""
     path = Path(artifact_path).expanduser()
@@ -76,7 +81,9 @@ def tool_analyze(
         "offline": offline,
         "source_context": source_context,
         "enrich": enrich,
-        "redact": None,  # use default redaction
+        "context_path": context_path,
+        "config_path": config_path,
+        "redact": True,
     }
 
     if path.is_file():
@@ -89,8 +96,13 @@ def tool_analyze(
             "triage": doc.get("triage", {}),
             "context": doc.get("context", {}),
             "raw_output_dir": str(out_path.resolve()),
+            "report_path": str((out_path / "report.json").resolve()),
+            "available_sections": list(doc),
         }
     else:
+        artifacts = service.discover_artifacts(path)
+        if len(artifacts) > max_artifacts:
+            raise ValueError(f"artifact directory contains {len(artifacts)} supported files; maximum is {max_artifacts}")
         runs = service.analyze_directory(path, out_path, **common_opts)
         return {
             "schema_version": SCHEMA_VERSION,
@@ -102,6 +114,7 @@ def tool_analyze(
                     "failure": _bounded_failure(r.document.get("failure", {})),
                     "root_cause": r.document.get("root_cause", {}),
                     "triage": r.document.get("triage", {}),
+                    "raw_output_dir": str(r.output_dir.resolve()),
                 }
                 for r in runs
             ],
@@ -165,6 +178,7 @@ def tool_log_command(
             "failure": _bounded_failure(doc.get("failure", {})),
             "root_cause": doc.get("root_cause", {}),
             "triage": doc.get("triage", {}),
+            "raw_output_dir": str(run_dir.resolve()),
         }
 
     return result
@@ -298,9 +312,9 @@ def tool_doctor(
     def add(name: str, ok: bool, detail: str) -> None:
         checks.append({"name": name, "ok": ok, "detail": detail})
 
-    python_supported = (3, 10) <= (sys.version_info.major, sys.version_info.minor) < (3, 13)
+    python_supported = (3, 10) <= (sys.version_info.major, sys.version_info.minor) < (3, 14)
     py_ver = f"{sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}"
-    add("python", python_supported, py_ver if python_supported else f"{py_ver} (requires >=3.10,<3.13)")
+    add("python", python_supported, py_ver if python_supported else f"{py_ver} (requires >=3.10,<3.14)")
     add("hound", True, __version__)
 
     config = None
@@ -349,3 +363,108 @@ def tool_list_incidents(
         "total_incidents": len(incidents),
         "incidents": incidents,
     }
+
+
+def tool_read_report(report_path: str, section: str = "all") -> dict[str, Any]:
+    """Read validated engine output, including timeline, source impact, and ticket data."""
+    from hound.fsio import read_bounded_text
+    from hound.ingest.redact import redact_text
+    from hound.models import validate
+    from hound.validation import MAX_REPORT_BYTES
+
+    path = Path(report_path)
+    if path_has_symlink(path):
+        raise ValueError("report must not use symlinks")
+    document = json.loads(read_bounded_text(path, MAX_REPORT_BYTES, encoding="utf-8"))
+    validate(document)
+    if section != "all" and section not in document:
+        raise ValueError(f"report has no section: {section}")
+    selected = document if section == "all" else {section: document[section]}
+
+    def scrub(value: Any) -> Any:
+        if isinstance(value, str):
+            return redact_text(value)[0]
+        if isinstance(value, dict):
+            return {key: scrub(item) for key, item in value.items()}
+        if isinstance(value, list):
+            return [scrub(item) for item in value]
+        return value
+
+    return {"report_path": str(path.resolve()), "sections": list(document), "report": scrub(selected)}
+
+
+def tool_validate_report(report_path: str, output_dir: str = "hound-output", persist: bool = False) -> dict[str, Any]:
+    """Validate schema, trust, timeline, and evidence using the shared audit engine."""
+    from hound.validation import validate_report
+
+    return validate_report(report_path, output_root=output_dir, persist=persist).to_dict()
+
+
+def tool_history_transfer(action: str, history_store: str, transfer_path: str) -> dict[str, Any]:
+    """Import or export the engine's bounded test-history interchange format."""
+    if action == "import":
+        count = qa_history.import_history(history_store, transfer_path)
+    elif action == "export":
+        count = qa_history.export_history(history_store, transfer_path)["count"]
+    else:
+        raise ValueError("action must be import or export")
+    return {"action": action, "count": count, "history_store": history_store, "transfer_path": transfer_path}
+
+
+def tool_feedback(
+    action: str, feedback_store: str, report_path: str | None = None, run_id: str | None = None,
+    usefulness: str = "unknown", notes: str = "", reviewed_only: bool = False,
+) -> dict[str, Any]:
+    """Deprecated compatibility adapter; use hound_feedback_record/list."""
+
+    if action == "list":
+        return tool_feedback_list(feedback_store, reviewed_only=reviewed_only)
+    if action != "record":
+        raise ValueError("action must be record or list")
+    if not report_path or not run_id:
+        raise ValueError("report_path and run_id are required to record feedback")
+    return tool_feedback_record(feedback_store, report_path, run_id, usefulness=usefulness, notes=notes)
+
+
+def tool_feedback_record(
+    feedback_store: str, report_path: str, run_id: str,
+    usefulness: str = "unknown", notes: str = "",
+) -> dict[str, Any]:
+    """Record pending diagnostic feedback."""
+    from hound.feedback import record_feedback
+
+    return record_feedback(feedback_store, report_path, run_id, usefulness=usefulness, notes=notes)
+
+
+def tool_feedback_list(feedback_store: str, reviewed_only: bool = False, limit: int = 50) -> dict[str, Any]:
+    """List bounded diagnostic feedback."""
+    from hound.feedback import read_feedback
+
+    records = read_feedback(feedback_store, reviewed_only=reviewed_only)
+    return {"count": min(len(records), limit), "total": len(records), "records": records[:limit]}
+
+
+def tool_history_import(history_store: str, transfer_path: str) -> dict[str, Any]:
+    count = qa_history.import_history(history_store, transfer_path)
+    return {"count": count, "history_store": history_store, "transfer_path": transfer_path}
+
+
+def tool_history_export(history_store: str, transfer_path: str) -> dict[str, Any]:
+    count = qa_history.export_history(history_store, transfer_path)["count"]
+    return {"count": count, "history_store": history_store, "transfer_path": transfer_path}
+
+
+def tool_evaluate(corpus_path: str, suite: str = "all", max_cases: int = 500, timeout: float = 300.0) -> dict[str, Any]:
+    """Run the deterministic diagnostic regression evaluator over a local corpus."""
+    from hound.eval import evaluate
+
+    corpus = Path(corpus_path)
+    if suite not in {"qa-history", "test-impact"}:
+        case_count = sum(1 for _ in corpus.rglob("*.json"))
+        if case_count > max_cases:
+            raise ValueError(f"evaluation corpus contains {case_count} JSON files; maximum is {max_cases}")
+    started = time.monotonic()
+    result = evaluate(corpus=corpus, suite=suite)
+    if time.monotonic() - started > timeout:
+        raise ValueError(f"evaluation exceeded the {timeout:g}s result deadline")
+    return result

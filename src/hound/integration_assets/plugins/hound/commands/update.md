@@ -6,6 +6,8 @@ usage: "/hound:update [check]"
 
 # Hound Update Command
 
+Updates are separate from diagnostic use. For skill-only installs, use the host harness's skill update mechanism; do not require a Hound executable. For MCP, inspect server version/status through the client and update only the server's actual installation source. The CLI checks below apply only to local package installs.
+
 When the user runs `/hound:update`:
 
 1. Run `hound --version` and identify whether Hound came from a Git checkout, `pip`, `pipx`, `uv tool`, or another package manager.

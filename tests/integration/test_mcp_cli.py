@@ -67,7 +67,7 @@ def test_mcp_cli_stdio_lifecycle(tmp_path):
     doc_resp = json.loads(doc_line)
     assert doc_resp["id"] == 2
     assert doc_resp["result"]["isError"] is False
-    doc_content = json.loads(doc_resp["result"]["content"][0]["text"])
+    doc_content = json.loads(doc_resp["result"]["content"][0]["text"])["data"]
     assert doc_content["schema_version"] == "2.0"
 
     # 4. tools/call hound_analyze on pytest_fail.log
@@ -91,7 +91,7 @@ def test_mcp_cli_stdio_lifecycle(tmp_path):
     analyze_resp = json.loads(analyze_line)
     assert analyze_resp["id"] == 3
     assert analyze_resp["result"]["isError"] is False
-    analysis = json.loads(analyze_resp["result"]["content"][0]["text"])
+    analysis = json.loads(analyze_resp["result"]["content"][0]["text"])["data"]
     assert analysis["failure"]["kind"] == "test_failure"
 
     # Close stdin to terminate loop

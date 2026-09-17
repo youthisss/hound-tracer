@@ -2028,9 +2028,9 @@ def run_doctor(args: argparse.Namespace) -> int:
     def add(name: str, ok: bool, detail: str) -> None:
         checks.append({"name": name, "ok": ok, "detail": detail})
 
-    python_supported = (3, 10) <= (sys.version_info.major, sys.version_info.minor) < (3, 13)
+    python_supported = (3, 10) <= (sys.version_info.major, sys.version_info.minor) < (3, 14)
     python_version = f"{sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}"
-    python_detail = python_version if python_supported else f"{python_version}; requires >=3.10,<3.13"
+    python_detail = python_version if python_supported else f"{python_version}; requires >=3.10,<3.14"
     add("python", python_supported, python_detail)
     add("hound", True, __version__)
     try:

@@ -1,9 +1,12 @@
 # Harness Integration
 
-Hound Tracer uses two portable surfaces:
+Hound Tracer uses three portable surfaces:
 
 - `skills/hound-tracer/SKILL.md` for agent instructions.
 - `hound-mcp` for MCP tools installed through the Python package.
+- `plugins/hound/commands/engine.md` for a capability-routed prompt that adapters can map to their native command format.
+
+The skill is usable with native harness tools alone; CLI and TUI sessions are not prerequisites. Actual engine execution uses MCP services directly, with the Hound package installed on the server host. Native-only diagnosis must be labeled advisory rather than presented as an engine result. Respect each harness's instruction hierarchy, tool discovery, permissions, and output format.
 
 The files in this directory are configuration examples, not interchangeable plugin manifests. Copy or merge only the example for the harness you use. Keep existing settings when merging.
 
@@ -24,7 +27,7 @@ All examples restrict Hound to the current workspace with `HOUND_MCP_ROOTS=.`. T
 
 ## MCP and hook contracts
 
-The six MCP tools map to existing Hound services. Analysis accepts `repo_dir` for
+The MCP tools map to existing Hound services. Analysis accepts `repo_dir` for
 source/git context; quality gates accept `history_store`; insights and incidents
 accept `output_dir` for locating stores from non-default runs. Command capture
 returns the analysis directory on failure. Check `exit_code` and `timed_out`

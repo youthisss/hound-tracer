@@ -1794,7 +1794,8 @@ def _investigation_text(
 
 class NavigationButton(Button):
     def render(self) -> Text:
-        label = self.label.copy()
+        # Textual 1+ exposes button labels as Content instead of Rich Text.
+        label = Text.from_markup(self.label.markup) if hasattr(self.label, "markup") else self.label.copy()
         label.align("center", self.content_size.width)
         label.stylize_before(self.rich_style)
         return label

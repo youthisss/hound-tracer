@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import json
 import logging
+import math
 import os
 from pathlib import Path
 import sys
@@ -16,11 +17,29 @@ from hound.mcp.tools import (
     tool_get_insights,
     tool_list_incidents,
     tool_log_command,
+    tool_read_report,
+    tool_validate_report,
+    tool_history_transfer,
+    tool_feedback,
+    tool_evaluate,
+    tool_feedback_list,
+    tool_feedback_record,
+    tool_history_export,
+    tool_history_import,
 )
 
 logger = logging.getLogger("hound.mcp")
 
 PROTOCOL_VERSION = "2024-11-05"
+
+CAPABILITY_LEVELS = {"readonly": 0, "diagnostic": 1, "write": 2, "execute": 3}
+TOOL_CAPABILITIES = {
+    "hound_read_report": "readonly", "hound_get_insights": "readonly", "hound_list_incidents": "readonly",
+    "hound_feedback_list": "readonly", "hound_doctor": "diagnostic", "hound_analyze": "diagnostic",
+    "hound_check_gate": "diagnostic", "hound_validate_report": "diagnostic", "hound_evaluate": "diagnostic",
+    "hound_history_export": "write", "hound_history_import": "write", "hound_feedback_record": "write",
+    "hound_history_transfer": "write", "hound_feedback": "write", "hound_log_command": "execute",
+}
 
 TOOL_DEFINITIONS = [
     {
@@ -57,6 +76,13 @@ TOOL_DEFINITIONS = [
                     "description": "Enrich analysis with git history and blame correlation.",
                     "default": False,
                 },
+                "repo_dir": {
+                    "type": "string",
+                    "description": "Local repository root for source context and git enrichment.",
+                },
+                "context_path": {"type": "string", "description": "Operator-supplied deployment/run context file for the shared investigation engine."},
+                "config_path": {"type": "string", "description": "Hound configuration file for engine policies and configured providers/connectors."},
+                "max_artifacts": {"type": "integer", "minimum": 1, "maximum": 1000, "default": 100, "description": "Maximum supported artifacts accepted from a directory."},
             },
             "required": ["artifact_path"],
         },
@@ -72,7 +98,8 @@ TOOL_DEFINITIONS = [
             "properties": {
                 "command": {
                     "type": "array",
-                    "items": {"type": "string"},
+                    "minItems": 1,
+                    "items": {"type": "string", "minLength": 1},
                     "description": "Command and arguments to execute as a list, e.g. ['pytest', 'tests/unit'].",
                 },
                 "cwd": {
@@ -146,6 +173,10 @@ TOOL_DEFINITIONS = [
                     "description": "Whether to enforce strict blocking policy outcome.",
                     "default": False,
                 },
+                "history_store": {
+                    "type": "string",
+                    "description": "Optional SQLite test history store used by the gate.",
+                },
             },
             "required": ["source_path"],
         },
@@ -173,10 +204,16 @@ TOOL_DEFINITIONS = [
                     "type": "integer",
                     "description": "Number of days in the past to query (default 30).",
                     "default": 30,
+                    "minimum": 1,
                 },
                 "history_store": {
                     "type": "string",
                     "description": "Optional path to SQLite history store file.",
+                },
+                "output_dir": {
+                    "type": "string",
+                    "description": "Output root containing .hound/history.sqlite3 when history_store is omitted.",
+                    "default": "hound-output",
                 },
             },
         },
@@ -218,11 +255,114 @@ TOOL_DEFINITIONS = [
                     "type": "integer",
                     "description": "Maximum number of incidents to return.",
                     "default": 50,
+                    "minimum": 1,
+                    "maximum": 50,
+                },
+                "output_dir": {
+                    "type": "string",
+                    "description": "Output root used to locate the incident store when state_path is omitted.",
+                    "default": "hound-output",
                 },
             },
         },
     },
 ]
+
+TOOL_DEFINITIONS.extend([
+    {
+        "name": "hound_read_report",
+        "description": "Read a validated RCA report or one section, including timeline, deployment investigation, source/test impact, and ticket output. Lists available sections.",
+        "inputSchema": {"type": "object", "properties": {
+            "report_path": {"type": "string"},
+            "section": {"type": "string", "default": "all"},
+        }, "required": ["report_path"]},
+    },
+    {
+        "name": "hound_validate_report",
+        "description": "Run Hound's report integrity engine: schema, trust profile, timeline coherence, source evidence, and connector checks. Optionally persist the audit.",
+        "inputSchema": {"type": "object", "properties": {
+            "report_path": {"type": "string"},
+            "output_dir": {"type": "string", "default": "hound-output"},
+            "persist": {"type": "boolean", "default": False},
+        }, "required": ["report_path"]},
+    },
+    {
+        "name": "hound_history_transfer",
+        "description": "Import or export Hound test history using its bounded JSON interchange format. Import updates the SQLite store; export writes transfer_path.",
+        "inputSchema": {"type": "object", "properties": {
+            "action": {"type": "string", "enum": ["import", "export"]},
+            "history_store": {"type": "string"},
+            "transfer_path": {"type": "string"},
+        }, "required": ["action", "history_store", "transfer_path"]},
+    },
+    {
+        "name": "hound_feedback",
+        "description": "Record pending feedback on a validated Hound report or list stored diagnostic feedback. Uses the same feedback engine as other Hound interfaces.",
+        "inputSchema": {"type": "object", "properties": {
+            "action": {"type": "string", "enum": ["record", "list"]},
+            "feedback_store": {"type": "string"},
+            "report_path": {"type": "string"}, "run_id": {"type": "string"},
+            "usefulness": {"type": "string", "enum": ["useful", "partial", "not_useful", "unknown"], "default": "unknown"},
+            "notes": {"type": "string", "default": ""},
+            "reviewed_only": {"type": "boolean", "default": False},
+        }, "required": ["action", "feedback_store"]},
+    },
+    {
+        "name": "hound_evaluate",
+        "description": "Run the offline diagnostic regression engine over a local Hound evaluation corpus. Returns measured classification and evidence metrics.",
+        "inputSchema": {"type": "object", "properties": {
+            "corpus_path": {"type": "string"},
+            "suite": {"type": "string", "enum": ["all", "dev", "held_out", "real", "private", "qa-history", "test-impact"], "default": "all"},
+            "max_cases": {"type": "integer", "minimum": 1, "maximum": 5000, "default": 500},
+            "timeout": {"type": "number", "minimum": 1, "maximum": 3600, "default": 300.0},
+        }, "required": ["corpus_path"]},
+    },
+    {
+        "name": "hound_history_import",
+        "description": "Import bounded test-history records into a Hound SQLite store. This is a state-changing operation.",
+        "inputSchema": {"type": "object", "properties": {
+            "history_store": {"type": "string"}, "transfer_path": {"type": "string"},
+        }, "required": ["history_store", "transfer_path"]},
+    },
+    {
+        "name": "hound_history_export",
+        "description": "Export bounded test-history records to a JSON interchange file. This writes transfer_path.",
+        "inputSchema": {"type": "object", "properties": {
+            "history_store": {"type": "string"}, "transfer_path": {"type": "string"},
+        }, "required": ["history_store", "transfer_path"]},
+    },
+    {
+        "name": "hound_feedback_record",
+        "description": "Record pending feedback for a validated Hound report. This changes the feedback store.",
+        "inputSchema": {"type": "object", "properties": {
+            "feedback_store": {"type": "string"}, "report_path": {"type": "string"}, "run_id": {"type": "string", "minLength": 1},
+            "usefulness": {"type": "string", "enum": ["useful", "partial", "not_useful", "unknown"], "default": "unknown"},
+            "notes": {"type": "string", "default": ""},
+        }, "required": ["feedback_store", "report_path", "run_id"]},
+    },
+    {
+        "name": "hound_feedback_list",
+        "description": "List bounded diagnostic feedback records without changing state.",
+        "inputSchema": {"type": "object", "properties": {
+            "feedback_store": {"type": "string"}, "reviewed_only": {"type": "boolean", "default": False},
+            "limit": {"type": "integer", "minimum": 1, "maximum": 200, "default": 50},
+        }, "required": ["feedback_store"]},
+    },
+])
+
+_OUTPUT_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "status": {"type": "string", "enum": ["success", "warning", "error"]},
+        "summary": {"type": "string"},
+        "data": {"type": "object"},
+        "artifacts": {"type": "array", "items": {"type": "object"}},
+        "next_actions": {"type": "array", "items": {"type": "string"}},
+    },
+    "required": ["status", "summary", "data", "artifacts", "next_actions"],
+}
+for _definition in TOOL_DEFINITIONS:
+    _definition["outputSchema"] = _OUTPUT_SCHEMA
 
 
 def dispatch_tool(name: str, arguments: dict[str, Any]) -> dict[str, Any]:
@@ -239,6 +379,24 @@ def dispatch_tool(name: str, arguments: dict[str, Any]) -> dict[str, Any]:
         return tool_doctor(**arguments)
     elif name == "hound_list_incidents":
         return tool_list_incidents(**arguments)
+    elif name == "hound_read_report":
+        return tool_read_report(**arguments)
+    elif name == "hound_validate_report":
+        return tool_validate_report(**arguments)
+    elif name == "hound_history_transfer":
+        return tool_history_transfer(**arguments)
+    elif name == "hound_feedback":
+        return tool_feedback(**arguments)
+    elif name == "hound_evaluate":
+        return tool_evaluate(**arguments)
+    elif name == "hound_history_import":
+        return tool_history_import(**arguments)
+    elif name == "hound_history_export":
+        return tool_history_export(**arguments)
+    elif name == "hound_feedback_record":
+        return tool_feedback_record(**arguments)
+    elif name == "hound_feedback_list":
+        return tool_feedback_list(**arguments)
     else:
         raise ValueError(f"Unknown tool: {name}")
 
@@ -262,12 +420,18 @@ def _validate_value(value: Any, schema: dict[str, Any], field: str) -> None:
         raise ValueError(f"{field} must be of type {expected}")
     if "enum" in schema and value not in schema["enum"]:
         raise ValueError(f"{field} must be one of {schema['enum']}")
+    if isinstance(value, str) and len(value) < schema.get("minLength", 0):
+        raise ValueError(f"{field} must contain at least {schema['minLength']} characters")
     if isinstance(value, (int, float)) and not isinstance(value, bool):
+        if isinstance(value, float) and not math.isfinite(value):
+            raise ValueError(f"{field} must be finite")
         if "minimum" in schema and value < schema["minimum"]:
             raise ValueError(f"{field} must be at least {schema['minimum']}")
         if "maximum" in schema and value > schema["maximum"]:
             raise ValueError(f"{field} must be at most {schema['maximum']}")
     if isinstance(value, list) and "items" in schema:
+        if len(value) < schema.get("minItems", 0):
+            raise ValueError(f"{field} must contain at least {schema['minItems']} items")
         for index, item in enumerate(value):
             _validate_value(item, schema["items"], f"{field}[{index}]")
 
@@ -304,14 +468,10 @@ def _path_is_allowed(value: str, roots: tuple[Path, ...]) -> bool:
 
 
 def _enforce_mcp_boundaries(name: str, arguments: dict[str, Any]) -> None:
-    if name == "hound_log_command" and os.environ.get("HOUND_MCP_ENABLE_COMMAND_EXECUTION") != "1":
-        raise PermissionError(
-            "command execution is disabled; set HOUND_MCP_ENABLE_COMMAND_EXECUTION=1 in the MCP server environment"
-        )
-
     path_fields = {
         "artifact_path", "output_dir", "cwd", "source_path", "repo_path",
-        "policy_path", "history_store", "config_path", "state_path",
+        "policy_path", "history_store", "config_path", "state_path", "repo_dir",
+        "context_path", "report_path", "transfer_path", "feedback_store", "corpus_path",
     }
     roots = _allowed_roots()
     for field in path_fields:
@@ -322,6 +482,20 @@ def _enforce_mcp_boundaries(name: str, arguments: dict[str, Any]) -> None:
         for value in arguments.get(field) or []:
             if not _path_is_allowed(value, roots):
                 raise PermissionError(f"{field} entries must be within an allowed MCP root")
+
+    configured_mode = os.environ.get("HOUND_MCP_MODE", "diagnostic").lower()
+    if configured_mode not in CAPABILITY_LEVELS:
+        raise PermissionError("HOUND_MCP_MODE must be readonly, diagnostic, write, or execute")
+    required_mode = TOOL_CAPABILITIES.get(name, "readonly")
+    if CAPABILITY_LEVELS[configured_mode] < CAPABILITY_LEVELS[required_mode]:
+        raise PermissionError(f"{name} requires HOUND_MCP_MODE={required_mode} or higher; current mode is {configured_mode}")
+    if name == "hound_log_command" and os.environ.get("HOUND_MCP_ENABLE_COMMAND_EXECUTION") != "1":
+        raise PermissionError(
+            "command execution is disabled; set HOUND_MCP_ENABLE_COMMAND_EXECUTION=1 in the MCP server environment"
+        )
+    if name == "hound_validate_report" and arguments.get("persist") and configured_mode not in {"write", "execute"}:
+        raise PermissionError("persisted report validation requires HOUND_MCP_MODE=write or execute")
+
 
 
 def _bounded_result(value: Any, depth: int = 0) -> Any:
@@ -340,6 +514,36 @@ def _bounded_result(value: Any, depth: int = 0) -> Any:
             for key, item in list(value.items())[:100]
         }
     return value
+
+
+def _envelope(name: str, data: dict[str, Any]) -> dict[str, Any]:
+    warning = bool(data.get("timed_out") or data.get("exists") is False or data.get("ok") is False)
+    artifacts = [
+        {"kind": key, "path": value}
+        for key, value in data.items()
+        if key.endswith(("_path", "_file", "_dir")) and isinstance(value, str)
+    ]
+    if data.get("timed_out"):
+        summary = f"{name} timed out"
+        next_actions = ["Inspect the captured log artifact before deciding whether to retry."]
+    elif data.get("exists") is False:
+        summary = str(data.get("message", f"{name} has no stored evidence"))
+        next_actions = ["Provide or import the missing evidence before drawing conclusions."]
+    else:
+        summary = f"{name} completed"
+        next_actions = []
+    return {"status": "warning" if warning else "success", "summary": summary, "data": data, "artifacts": artifacts, "next_actions": next_actions}
+
+
+def _error_envelope(code: str, summary: str, retryable: bool, next_actions: list[str]) -> dict[str, Any]:
+    return {"status": "error", "summary": summary, "error": {"code": code, "retryable": retryable}, "artifacts": [], "next_actions": next_actions}
+
+
+PROMPTS = [{
+    "name": "hound_diagnose_failure",
+    "description": "Evidence-first failure diagnosis using the smallest available Hound workflow.",
+    "arguments": [{"name": "artifact_path", "description": "Failure artifact on the MCP server filesystem", "required": True}],
+}]
 
 
 class MCPServer:
@@ -376,6 +580,8 @@ class MCPServer:
                     "protocolVersion": PROTOCOL_VERSION,
                     "capabilities": {
                         "tools": {},
+                        "resources": {},
+                        "prompts": {},
                     },
                     "serverInfo": {
                         "name": "hound-tracer",
@@ -400,6 +606,44 @@ class MCPServer:
                 },
             }
 
+        elif method == "resources/list":
+            return {"jsonrpc": "2.0", "id": req_id, "result": {"resources": []}}
+
+        elif method == "resources/templates/list":
+            return {"jsonrpc": "2.0", "id": req_id, "result": {"resourceTemplates": [{
+                "uriTemplate": "hound://report{?path,section}", "name": "Hound report", "mimeType": "application/json",
+                "description": "Validated, redacted Hound report data. Path must remain inside HOUND_MCP_ROOTS.",
+            }]}}
+
+        elif method == "resources/read":
+            from urllib.parse import parse_qs, urlparse
+            uri = params.get("uri")
+            if not isinstance(uri, str) or not uri.startswith("hound://report"):
+                return _invalid_request(req_id, -32602, "Invalid Hound resource URI")
+            query = parse_qs(urlparse(uri).query)
+            report_path = query.get("path", [""])[0]
+            section = query.get("section", ["all"])[0]
+            try:
+                arguments = _validate_tool_arguments("hound_read_report", {"report_path": report_path, "section": section})
+                result = tool_read_report(**arguments)
+                return {"jsonrpc": "2.0", "id": req_id, "result": {"contents": [{
+                    "uri": uri, "mimeType": "application/json", "text": json.dumps(_bounded_result(result), ensure_ascii=False),
+                }]}}
+            except (TypeError, ValueError, FileNotFoundError, PermissionError) as exc:
+                return _invalid_request(req_id, -32602, str(exc))
+
+        elif method == "prompts/list":
+            return {"jsonrpc": "2.0", "id": req_id, "result": {"prompts": PROMPTS}}
+
+        elif method == "prompts/get":
+            if params.get("name") != "hound_diagnose_failure":
+                return _invalid_request(req_id, -32602, "Unknown prompt")
+            artifact_path = (params.get("arguments") or {}).get("artifact_path", "")
+            return {"jsonrpc": "2.0", "id": req_id, "result": {
+                "description": "Diagnose a failure artifact with Hound",
+                "messages": [{"role": "user", "content": {"type": "text", "text": f"Analyze {artifact_path} with hound_analyze offline, confirm cited source evidence, and report verification status."}}],
+            }}
+
         elif method == "tools/call":
             tool_name = params.get("name")
             if not isinstance(tool_name, str):
@@ -415,7 +659,7 @@ class MCPServer:
             arguments = {} if raw_arguments is None else raw_arguments
             try:
                 arguments = _validate_tool_arguments(tool_name, arguments)
-                result_data = dispatch_tool(tool_name, arguments)
+                result_data = _envelope(tool_name, dispatch_tool(tool_name, arguments))
                 return {
                     "jsonrpc": "2.0",
                     "id": req_id,
@@ -435,7 +679,7 @@ class MCPServer:
                     "jsonrpc": "2.0",
                     "id": req_id,
                     "result": {
-                        "content": [{"type": "text", "text": f"Invalid tool request: {exc}"}],
+                        "content": [{"type": "text", "text": json.dumps(_error_envelope("INVALID_REQUEST", str(exc), False, ["Correct the arguments or request the required MCP capability."]))}],
                         "isError": True,
                     },
                 }

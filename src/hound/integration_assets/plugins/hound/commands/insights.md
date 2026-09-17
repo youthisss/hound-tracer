@@ -6,6 +6,8 @@ usage: "/hound:insights [test-name]"
 
 # Hound Insights Command
 
+Follow host permissions and prefer connected MCP or native CI/history tools. CLI examples are optional. If no history source is available, report insufficient evidence rather than requiring a Hound install or inventing flakiness statistics.
+
 When the user runs `/hound:insights [test-name]`:
 
 1. If a test name is provided:

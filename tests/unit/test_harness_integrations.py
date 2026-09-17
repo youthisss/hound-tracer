@@ -38,3 +38,12 @@ def test_reference_plugin_commands_exist() -> None:
     manifest = json.loads(path.read_text(encoding="utf-8"))
     for command in manifest["commands"]:
         assert (path.parent / command["file"]).is_file(), command["name"]
+
+
+def test_packaged_integration_assets_match_reference() -> None:
+    packaged = ROOT / "src" / "hound" / "integration_assets"
+    for folder in ("skills", "plugins"):
+        for target in (packaged / folder).rglob("*"):
+            if target.is_file() and target.suffix in {".md", ".json", ".py"}:
+                source = ROOT / target.relative_to(packaged)
+                assert target.read_text(encoding="utf-8") == source.read_text(encoding="utf-8"), source

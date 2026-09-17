@@ -21,8 +21,8 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
-      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
-      - uses: astral-sh/setup-uv@2af22b5b2dcfc0729ee842c635f300f1fc5a9e9a # v5.0.0
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+      - uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # v7.6.0
       - run: uv sync --frozen --extra dev
       - run: uv run ruff check .
       - run: uv run mypy src/hound
@@ -46,20 +46,36 @@ jobs:
     timeout-minutes: 30
     strategy:
       matrix:
-        python: ["3.10", "3.11", "3.12"]
+        python: ["3.10", "3.11", "3.12", "3.13"]
     steps:
-      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
-      - uses: astral-sh/setup-uv@2af22b5b2dcfc0729ee842c635f300f1fc5a9e9a # v5.0.0
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+      - uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # v7.6.0
       - run: uv python install ${{ matrix.python }}
       - run: uv sync --frozen --extra dev --python ${{ matrix.python }}
       - run: uv run --python ${{ matrix.python }} pytest -m "unit and not slow" -q
+
+  python-313:
+    name: Python 3.13 CLI and TUI
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+      - uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # v7.6.0
+      - run: uv python install 3.13
+      - run: uv sync --frozen --extra dev --python 3.13
+      - name: Verify Python 3.13 runtime contract
+        run: uv run --python 3.13 hound doctor --output-dir hound-doctor --json
+      - name: Exercise Python 3.13 CLI workflows
+        run: uv run --python 3.13 pytest tests/e2e/test_cli.py tests/e2e/test_cli_commands.py -q
+      - name: Exercise Python 3.13 TUI compatibility
+        run: uv run --python 3.13 pytest tests/e2e/test_tui.py -k "test_tui_compose or test_tui_analyze or test_tui_no_logs or test_tui_back_navigation_and_shortcuts" -q
 
   package-security:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
-      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
-      - uses: astral-sh/setup-uv@2af22b5b2dcfc0729ee842c635f300f1fc5a9e9a # v5.0.0
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+      - uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # v7.6.0
       - run: uv sync --frozen --extra dev
       - name: Audit locked production dependencies
         run: |
@@ -100,6 +116,7 @@ jobs:
         with:
           scan-type: fs
           scan-ref: .
+          cache: "false"
           scanners: vuln,secret
           severity: HIGH,CRITICAL
           skip-dirs: tests,examples,dist,.venv
@@ -111,8 +128,8 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 45
     steps:
-      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
-      - uses: astral-sh/setup-uv@2af22b5b2dcfc0729ee842c635f300f1fc5a9e9a # v5.0.0
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+      - uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # v7.6.0
       - run: uv sync --frozen --extra dev
       - run: uv run pytest --cov=hound --cov-report=term --cov-fail-under=80 -q
       - run: uv run python -m hound.eval --offline --check --format json
@@ -148,6 +165,7 @@ jobs:
         uses: aquasecurity/trivy-action@57a97c7e7821a5776cebc9bb87c984fa69cba8f1 # v0.35.0
         with:
           image-ref: hound:test
+          cache: "false"
           scanners: vuln,secret
           severity: HIGH,CRITICAL
           ignore-unfixed: true
@@ -156,6 +174,7 @@ jobs:
         uses: aquasecurity/trivy-action@57a97c7e7821a5776cebc9bb87c984fa69cba8f1 # v0.35.0
         with:
           image-ref: hound-action:test
+          cache: "false"
           scanners: vuln,secret
           severity: HIGH,CRITICAL
           ignore-unfixed: true
@@ -166,8 +185,8 @@ jobs:
     runs-on: windows-latest
     timeout-minutes: 30
     steps:
-      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
-      - uses: astral-sh/setup-uv@2af22b5b2dcfc0729ee842c635f300f1fc5a9e9a # v5.0.0
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+      - uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # v7.6.0
       - run: uv sync --frozen --extra dev
       - run: uv run pytest -m "not slow and not network" -q
       - run: uv build
@@ -184,7 +203,7 @@ jobs:
 
   ci-result:
     if: always()
-    needs: [quality, compatibility, package-security, extended, windows]
+    needs: [quality, compatibility, python-313, package-security, extended, windows]
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
@@ -192,15 +211,17 @@ jobs:
         env:
           QUALITY: ${{ needs.quality.result }}
           COMPATIBILITY: ${{ needs.compatibility.result }}
+          PYTHON_313: ${{ needs.python-313.result }}
           PACKAGE_SECURITY: ${{ needs.package-security.result }}
           EXTENDED: ${{ needs.extended.result }}
           WINDOWS: ${{ needs.windows.result }}
         run: |
           printf '| Check | Result |\n|---|---|\n' >> "$GITHUB_STEP_SUMMARY"
-          printf '| quality | %s |\n| compatibility | %s |\n| package-security | %s |\n| extended | %s |\n| windows | %s |\n' \
-            "$QUALITY" "$COMPATIBILITY" "$PACKAGE_SECURITY" "$EXTENDED" "$WINDOWS" >> "$GITHUB_STEP_SUMMARY"
+          printf '| quality | %s |\n| compatibility | %s |\n| Python 3.13 CLI/TUI | %s |\n| package-security | %s |\n| extended | %s |\n| windows | %s |\n' \
+            "$QUALITY" "$COMPATIBILITY" "$PYTHON_313" "$PACKAGE_SECURITY" "$EXTENDED" "$WINDOWS" >> "$GITHUB_STEP_SUMMARY"
           test "$QUALITY" = success
           test "$COMPATIBILITY" = success
+          test "$PYTHON_313" = success
           test "$PACKAGE_SECURITY" = success
           test "$EXTENDED" = success -o "$EXTENDED" = skipped
           test "$WINDOWS" = success -o "$WINDOWS" = skipped

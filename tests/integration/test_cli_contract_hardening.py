@@ -59,13 +59,13 @@ def test_clean_accepts_hound_qa_and_delivery_stores(tmp_path) -> None:
 def test_doctor_rejects_python_outside_supported_range(tmp_path, monkeypatch, capsys) -> None:
     import hound.cli as cli
 
-    monkeypatch.setattr(cli.sys, "version_info", SimpleNamespace(major=3, minor=13, micro=0))
+    monkeypatch.setattr(cli.sys, "version_info", SimpleNamespace(major=3, minor=14, micro=0))
 
     assert main(["doctor", "--output-dir", str(tmp_path / "doctor"), "--json"]) == 2
     payload = json.loads(capsys.readouterr().out)
     python_check = next(item for item in payload["checks"] if item["name"] == "python")
     assert python_check["ok"] is False
-    assert "requires >=3.10,<3.13" in python_check["detail"]
+    assert "requires >=3.10,<3.14" in python_check["detail"]
 
 
 def test_cli_delivery_admin_commands_are_explicit(tmp_path, capsys) -> None:

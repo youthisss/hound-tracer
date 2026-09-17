@@ -223,9 +223,8 @@ def _mcp_server() -> dict[str, Any]:
 
 
 def _install_skill(harness: str, scope: str, root: Path, dry_run: bool) -> list[str]:
-    destination = _skill_directory(harness, scope, root) / "SKILL.md"
-    content = _asset("skills", "hound-tracer", "SKILL.md").read_text(encoding="utf-8")
-    return [str(destination)] if _write_if_changed(destination, content, dry_run=dry_run) else []
+    destination = _skill_directory(harness, scope, root)
+    return _copy_asset_tree(_asset("skills", "hound-tracer"), destination, dry_run=dry_run)
 
 
 def _copy_asset_tree(source: Any, destination: Path, *, dry_run: bool) -> list[str]:
@@ -473,7 +472,8 @@ def uninstall_integrations(
                 if _remove_path(skill_dir, dry_run=dry_run):
                     changed.append(str(skill_dir))
             if "mcp" not in components:
-                config_changed, config_warnings = [], []
+                config_changed: list[str] = []
+                config_warnings: list[str] = []
             elif harness == "codex":
                 config_changed, config_warnings = _uninstall_codex(scope, root, dry_run)
             elif harness == "hermes":

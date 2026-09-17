@@ -7,6 +7,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.7.0] - 2026-09-17
+
+### Added
+- Expanded the bounded MCP engine with report reading and validation, offline
+  evaluation, test-history transfer, feedback operations, resources, prompts,
+  capability classes, stable envelopes, and stricter input validation.
+- Added shared diagnostic-engine guidance and packaged integration assets for
+  OpenCode, Hermes Agent, Codex, Cursor, Antigravity, and Claude-compatible
+  plugin workflows.
+- Added a dedicated Python 3.13 CLI and TUI workflow alongside the compatibility
+  matrix.
+
+### Changed
+- Reworked the README around fast installation, real report evidence, common
+  workflows, progressive disclosure, and focused documentation links.
+- Extended supported runtimes to CPython 3.13 and made TUI button rendering
+  compatible with newer Textual content labels.
+- Upgraded GitHub workflow actions to Node.js 24-compatible releases and disabled
+  Trivy's legacy transitive Node.js 20 cache action.
+- Made integration installation copy complete skill asset trees, including
+  report, security, native fallback, and tool references.
+
+### Security
+- Added MCP capability levels for read-only, diagnostic, write, and execute
+  operations, with explicit filesystem roots and command-execution opt-in.
+
 ## [0.6.0] - 2026-09-17
 
 ### Added

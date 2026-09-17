@@ -6,6 +6,8 @@ usage: "/hound:gate [test-results.xml]"
 
 # Hound Gate Command
 
+Use connected `hound_check_gate` or the project's authorized gate runner. The CLI below is optional. Without a gate engine, review the actual policy and evidence with native tools and label the result advisory. Discover real baseline/candidate refs; do not assume `origin/main` exists or report a pass when policy/evidence is missing.
+
 When the user runs `/hound:gate [test-results.xml]`:
 
 1. Locate the test results (defaulting to any JUnit XML in `target/`, `build/`, or test output directories).

@@ -6,6 +6,8 @@ usage: "/hound:doctor"
 
 # Hound Doctor Command
 
+Prefer connected `hound_doctor`. The CLI below is optional; if Hound is absent, inspect only the available harness/runtime capabilities and identify the missing engine connection. Do not install Hound or open its TUI as a prerequisite for other diagnostic workflows.
+
 When the user runs `/hound:doctor`:
 
 1. Run:

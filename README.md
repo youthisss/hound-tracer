@@ -11,100 +11,101 @@
 
 # Hound Tracer
 
-**Offline-first diagnostics for CI/CD, build, test, deployment, and container failures**
+**Turn failed builds, tests, deployments, and containers into evidence-backed root-cause reports.**
 
 [![PyPI](https://img.shields.io/pypi/v/hound-tracer.svg)](https://pypi.org/project/hound-tracer/)
-[![Python](https://img.shields.io/badge/Python-3.10%20to%203.12-blue.svg)](pyproject.toml)
+[![Python](https://img.shields.io/badge/Python-3.10%20to%203.13-blue.svg)](pyproject.toml)
 [![Status](https://img.shields.io/badge/status-beta-yellow.svg)](#project-status)
-[![Security](https://img.shields.io/badge/redaction-default-orange.svg)](#security-and-trust-boundaries)
+[![Security](https://img.shields.io/badge/redaction-default-orange.svg)](#security-boundary)
 [![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+
+[Install](#install) · [Quick start](#quick-start) · [Workflows](#common-workflows) · [Interfaces](#interfaces) · [Documentation](#documentation)
 
 </div>
 
-Hound Tracer turns raw failure evidence into a structured root-cause report, triage decision, and ticket draft. It accepts plain logs, JUnit XML, SARIF, and supported test-report JSON; frames stack traces; removes recognized secrets and PII; adds optional Git context; detects recurring incidents; and can use either deterministic offline rules or an explicitly configured LLM.
+Hound Tracer converts raw failure evidence into a structured investigation: failure classification, cited evidence, root-cause hypotheses, triage, recommended checks, and a reviewable ticket draft. It reads plain logs, JUnit XML, SARIF, and supported test-report JSON.
 
-The analysis is advisory. Hound does not deploy, retry, or roll back infrastructure. Features that explicitly run commands, including `hound log -- <command>`, MCP command execution, and **Run project** in the TUI, execute operator-selected, checkout-controlled code with the Hound process permissions. They are not a sandbox.
+The deterministic engine works offline. LLM analysis, repository source context, deployment enrichment, and external ticket delivery are separate capabilities that you enable explicitly.
 
-Use Hound when you need a repeatable investigation artifact rather than another stream of raw CI output. The offline engine is the safe baseline. Provider-backed analysis, repository source context, deployment enrichment, and external ticket delivery are separate capabilities that you enable deliberately.
+| What Hound does | What that gives you |
+|---|---|
+| Frames stack traces and failed tests | A focused failure record instead of another raw log stream |
+| Cites supporting and contradicting evidence | A diagnosis that can be checked against the source artifact |
+| Redacts recognized secrets and PII by default | Safer reports, prompts, state snapshots, and delivery payloads |
+| Fingerprints recurring incidents | Recurrence counts and optional reuse of reviewed RCA snapshots |
+| Tracks test history, coverage, and SARIF | Flakiness, duration regressions, and versioned quality gates |
+| Exposes CLI, TUI, HTTP, GitHub Action, and MCP surfaces | One analysis pipeline across local, CI, service, and coding-agent workflows |
 
-## Contents
+> [!IMPORTANT]
+> Hound is advisory. It does not deploy, retry, roll back, or edit infrastructure. Features that explicitly run commands execute operator-selected, checkout-controlled code with the Hound process permissions. They are not a sandbox.
 
-- [Why Hound](#why-hound)
-- [How it works](#how-it-works)
-- [Installation](#installation)
-- [Quick start](#quick-start)
-- [Core workflow](#core-workflow)
-- [Inputs and outputs](#inputs-and-outputs)
-- [Interfaces](#interfaces)
-- [Command reference](#command-reference)
-- [Configuration and providers](#configuration-and-providers)
-- [Quality gates and test insights](#quality-gates-and-test-insights)
-- [CI, Docker, and coding-agent integration](#ci-docker-and-coding-agent-integration)
-- [Security and trust boundaries](#security-and-trust-boundaries)
-- [Supported failures and ecosystems](#supported-failures-and-ecosystems)
-- [Operations and state](#operations-and-state)
-- [Development and verification](#development-and-verification)
-- [Documentation map](#documentation-map)
+## See the result
 
-## Why Hound
+This excerpt comes from an offline report generated from a failing Cargo test in [`demo-output`](demo-output/):
 
-🔎 **Evidence first.** Reports retain concrete evidence references, framed stack traces, failed tests, source locations, and uncertainty instead of returning an unsupported diagnosis.
+```text
+Failure
+  Stage: test
+  Kind: test_failure
+  Summary: test totals::adds_tax ... FAILED
 
-🔒 **Private by default.** Offline mode makes no provider request. Redaction runs before supported content reaches reports, model prompts, dedup snapshots, or delivery connectors.
+Root cause
+  Hypothesis: Test assertion failed; the code under test diverges from expectations.
+  Confidence: medium
+  Evidence score: 0.75
+  Support status: supported
 
-🧭 **One engine, several interfaces.** The CLI, Textual TUI, HTTP service, GitHub Action, and MCP server use the same analysis pipeline and document schema.
+Evidence
+  Failed test: totals::adds_tax
+  Location: src/totals.rs:13
+  Assertion: left 10, right 11
 
-📉 **Controlled model usage.** Deduplication, failure-kind routing, call limits, retry limits, concurrency limits, and USD budgets keep optional LLM use bounded.
+Triage
+  Severity: medium
+  Component: src
+  Priority: 3
+```
 
-🧪 **QA beyond one failure.** Hound stores test history, detects flakiness and duration regressions, compares coverage, reads SARIF, and evaluates versioned quality-gate policies.
+Each analysis writes:
 
-📨 **Recoverable delivery.** GitHub, Jira, GitLab, and Slack delivery uses a persistent ledger to distinguish confirmed, failed, pending, and ambiguous outcomes. Delivery remains opt-in.
+```text
+run-<id>/
+├── report.json   # RCA Document Schema v2.0 for automation
+├── report.md     # investigation for humans
+└── ticket.md     # reviewable issue draft
+```
+
+The complete contract includes evidence provenance, hypotheses, missing information, recommended checks, timeline data, source impact, recurrence, engine status, fallback reason, and cost information. See the [architecture guide](docs/architecture.md) and [RCA JSON Schema](docs/schema/rca-v2.0.schema.json).
 
 ## How it works
 
 ```text
-┌──────────────────────────────────────────────────────────────┐
-│ Failure evidence                                             │
-│ .log · JUnit .xml · SARIF .sarif · supported test-report.json│
-└──────────────────────────────┬───────────────────────────────┘
-                               ▼
-┌──────────────────────────────────────────────────────────────┐
-│ Ingest                                                       │
-│ bounded reads · head/tail windows · stack framing · redaction│
-└──────────────────────────────┬───────────────────────────────┘
-                               ▼
-┌──────────────────────────────────────────────────────────────┐
-│ Context                                                      │
-│ metadata · Git diff/blame/commits · CODEOWNERS · source lines│
-│ optional read-only Kubernetes, Helm, Prometheus, Tempo data  │
-└──────────────────────────────┬───────────────────────────────┘
-                               ▼
-┌──────────────────────────────────────────────────────────────┐
-│ RCA                                                          │
-│ reviewed cache → optional LLM → deterministic fallback       │
-│ schema validation · evidence-reference validation · budgets  │
-└──────────────────────────────┬───────────────────────────────┘
-                               ▼
-┌──────────────────────────────────────────────────────────────┐
-│ Triage and output                                            │
-│ severity · component · fingerprint · recurrence · flakiness  │
-│ report.json · report.md · ticket.md · optional delivery      │
-└──────────────────────────────────────────────────────────────┘
+Failure evidence
+  .log · JUnit XML · SARIF · supported test-report JSON
+       │
+       ▼
+Ingest
+  bounded reads · stack framing · test parsing · redaction
+       │
+       ▼
+Context, when enabled
+  Git diff/blame · CODEOWNERS · source lines · deployment signals
+       │
+       ▼
+Root-cause analysis
+  reviewed cache → optional LLM → deterministic fallback
+  schema validation · evidence-reference validation · budgets
+       │
+       ▼
+Triage and output
+  severity · component · fingerprint · recurrence · ticket draft
 ```
 
-The primary machine-readable output is RCA Document Schema v2.0. A report includes:
+The CLI, TUI, HTTP service, GitHub Action, and MCP server call the same application service and analysis pipeline.
 
-- failure stage, kind, summary, message, failed tests, and stack frames;
-- hypotheses, confidence, supporting and contradicting evidence, missing information, and recommended checks;
-- root-cause summary and fix suggestion;
-- severity, component, fingerprint, recurrence, and flaky-suspect state;
-- analysis engine, LLM status, fallback reason, cost information, and context provenance.
+## Install
 
-See [`docs/architecture.md`](docs/architecture.md) and [`docs/schema/rca-v2.0.schema.json`](docs/schema/rca-v2.0.schema.json) for the complete contract.
-
-## Installation
-
-Hound supports CPython `>=3.10,<3.13`. Windows and Linux are tested surfaces. macOS is expected to be portable, but release-runner evidence is still pending.
+Hound supports CPython `>=3.10,<3.14`. Windows and Linux are tested. macOS is expected to be portable, but release-runner evidence is still pending. See the [support matrix](docs/support-matrix.md).
 
 ### uv tool, recommended
 
@@ -134,188 +135,88 @@ uv run hound doctor
 
 Installed entry points:
 
-- `hound`: launcher and full CLI;
-- `hound-mcp`: stdio MCP server for coding-agent clients.
+- `hound` opens the launcher or runs a CLI command.
+- `hound-mcp` starts the stdio MCP server for coding-agent clients.
 
 ## Quick start
 
+### Analyze an existing failure
+
 ```sh
-# Create .hound.yml and a local .hound workspace
-hound init
+hound analyze failure.log --offline
+```
 
-# Check Python, configuration, output storage, Git, Docker, and kubectl
-hound doctor
+Hound writes `report.json`, `report.md`, and `ticket.md` under `hound-output/`. Offline mode makes no provider request.
 
-# Capture a command and analyze the captured evidence
+### Capture and analyze a command
+
+```sh
 hound log --analyze --offline -- pytest -q
+```
 
-# Or place artifacts in .hound/artifacts and analyze the workspace
+The command output is redacted while it is captured. Hound preserves the wrapped command's exit code and analyzes the capture when requested.
+
+### Initialize a project workspace
+
+```sh
+hound init
+hound doctor
 hound analyze --offline
 ```
 
-`hound init` is idempotent. It keeps an existing `.hound.yml`, creates the project workspace, and configures SQLite incident state at `.hound/state/incidents.sqlite3` for initialized projects.
+`hound init` creates `.hound.yml` and an idempotent `.hound/` workspace for artifacts, captures, project runs, results, and local state. An existing configuration is preserved.
 
-You can also work without initializing a project:
+> [!TIP]
+> Use an explicit subcommand in automation. Bare `hound` requires an interactive TTY and opens the interface launcher.
 
-```sh
-# Analyze one file or recursively discover artifacts in a directory
-hound analyze failure.log --offline
-hound analyze ./ci-logs --offline
+## Common workflows
 
-# Add bounded source context from the current Git checkout
-hound analyze ./ci-logs --repo-dir . --source-context --offline
-
-# Open the interface launcher or go directly to the TUI
-hound
-hound console --logs ./ci-logs --offline
-```
-
-For automation, always use an explicit subcommand. Running bare `hound` requires an interactive TTY.
-
-## Core workflow
-
-1. **Collect evidence.** Give Hound an existing artifact, scan a directory, pipe stdin into `hound log`, or let `hound log -- <command>` capture a process.
-2. **Choose the trust boundary.** Start with `--offline`. Enable source context, enrichment, a provider, or delivery only for evidence you trust.
-3. **Inspect the result.** Read `report.md` for the investigation, `report.json` for automation, and `ticket.md` for a reviewable issue draft.
-4. **Review before acting.** Treat the root-cause hypothesis and remediation as evidence-backed guidance, not an automatic change plan.
-5. **Build history.** Keep deduplication enabled, import test results with `hound insights import`, and record engineer feedback when you have verified the diagnosis.
-
-## Inputs and outputs
-
-### Accepted evidence
-
-| Input | Notes |
-|---|---|
-| `.log` | Plain build, test, CI, deployment, or container output |
-| JUnit `.xml` | Structured suites, cases, failures, errors, skips, and durations |
-| `.sarif` | SARIF 2.1.0 findings from tools such as CodeQL, Semgrep, Snyk, ESLint, and Trivy |
-| Test-report `.json` | Recognized structured reports in report-bearing paths |
-| Piped stdin | Captured through `hound log --name <name>` |
-| Git checkout | Optional bounded diff, blame, commit, CODEOWNERS, source, and impact context |
-
-Directory analysis is recursive. Dependency trees, virtual environments, VCS metadata, and common caches are pruned. Symlinked files and directories are not followed.
-
-### Generated files
-
-For directory analysis, Hound writes one isolated directory per artifact under the selected output root. Single-file analysis writes directly to the selected output directory. Every Hound-managed output directory carries a `.hound-owned` marker so `hound clean` cannot remove an arbitrary directory.
-
-```text
-hound-output/
-├── .hound-owned
-├── run-<id>/
-│   ├── .hound-owned
-│   ├── report.json
-│   ├── report.md
-│   └── ticket.md
-└── .hound/
-    ├── state.json or state.sqlite3
-    ├── feedback.sqlite3
-    ├── history.sqlite3
-    └── deliveries.sqlite3
-```
-
-`hound log` also creates a redacted `.log` and JSON sidecar containing sanitized command arguments, working directory, Git metadata, timestamps, duration, and exit status. Original input artifacts are never rewritten.
-
-An initialized project uses this workspace layout:
-
-```text
-.hound/
-├── artifacts/    # manually supplied input artifacts
-├── captures/     # redacted hound log captures and sidecars
-├── runs/         # TUI project-run records
-├── results/      # generated reports and ticket drafts
-└── state/        # initialized project state
-```
-
-When `.hound/` exists, `hound analyze --offline` scans the workspace while pruning generated results and state. `hound log` writes captures and analysis results into the workspace unless you override their paths.
-
-### Analysis exit codes
-
-| Code | Meaning |
-|---:|---|
-| `0` | Analysis completed and no actionable failure was detected |
-| `1` | Analysis completed and detected a failure |
-| `2` | Invalid arguments, configuration, or input |
-| `3` | Internal execution, I/O, or required delivery failure |
-
-`hound log` normally preserves the wrapped command exit code. A command timeout uses exit code `124`; explicit cancellation uses `130`.
-
-## Interfaces
-
-### Terminal UI
+### Add source and Git evidence
 
 ```sh
-hound console --logs ./ci-logs --offline
-hound console --logs ./ci-logs --online --jobs 4 --max-llm-calls 20
+hound analyze ./ci-logs \
+  --repo-dir . \
+  --source-context \
+  --offline
 ```
 
-The TUI contains Home, Artifacts, Project Runs, Results, and Quality workspaces. Stored analysis runs expose Overview, Report, Ticket, Context, and Raw log views. Settings manage provider selection, model discovery, credentials through the system keyring, trust mode, and offline mode.
+Source context is opt-in and intended for trusted checkouts. It can add bounded snippets, diff context, blame, commit subjects, CODEOWNERS, and advisory test-impact information.
 
-The **Run project** dialog detects likely test, build, lint, and check commands from common manifests. Detection is a convenience, not a safety judgment. npm hooks, Rust build scripts, Maven plugins, Gradle tasks, Make dependencies, compiler plugins, and invoked binaries remain checkout-controlled code. Runs are unsandboxed, use an immutable working-directory request, stop after five minutes by default, support process-tree cancellation, cap captured output at 16 MiB, redact persisted argv and output, and write run records atomically.
-
-Main keyboard controls:
-
-| Key | Action |
-|:---:|---|
-| `a` / `A` | Analyze the selected artifact / analyze all visible artifacts |
-| `Ctrl+R` | Open Run project |
-| `x` | Stop active analysis or project execution; otherwise clear the selected result |
-| `Ctrl+X` | Stop analysis |
-| `r` | Refresh current data |
-| `h` | Home |
-| `f` / `j` / `l` / `y` | Artifacts / Project Runs / Results / Quality |
-| `i` | Current-run overview |
-| `b` | Browse directory |
-| `s` | Settings |
-| `o` | Toggle offline mode, subject to trust policy |
-| `space` | Toggle focused selection |
-| `z` / `d` | Select all / deselect all in the active workspace |
-| `p` / `n` | Previous / next page or opened result |
-| `c` / `e` | Copy report / ticket Markdown |
-| `v` | Record feedback for the opened run |
-| `?` | Help |
-| `Escape` / `B` | Back |
-| `q` | Return to the launcher, or exit when started with `hound console` |
-| `Ctrl+C` | Quit the TUI |
-
-### Persistent Rich CLI
+### Process a directory with bounded model usage
 
 ```sh
-hound cli
+hound batch \
+  --logs ./ci-logs \
+  --output-dir ./batch-output \
+  --jobs 8 \
+  --max-llm-calls 50 \
+  --max-cost-usd 5.00
 ```
 
-Inside the session, omit the executable name: enter `doctor`, `analyze . --offline`, or `runs`. `Ctrl+L` redraws the header. `Ctrl+C` exits immediately. `exit` or `Ctrl+D` returns to the launcher when the session was opened there, or to the shell when started with `hound cli`.
+When a call or cost budget is exhausted, remaining artifacts use deterministic fallback and record `budget_skipped`.
 
-### HTTP service
-
-The built-in service uses Bearer authentication and a persistent SQLite queue. It binds to loopback. Put a controlled reverse proxy in front of it for TLS or remote ingress.
+### Build test history and evaluate a quality gate
 
 ```sh
-export HOUND_SERVER_TOKEN="replace-with-a-long-random-token"
+hound insights import ./junit.xml \
+  --test-runner pytest \
+  --branch main \
+  --commit abc1234 \
+  --environment "os=linux;python=3.11"
 
-hound serve \
-  --host 127.0.0.1 \
-  --port 8123 \
-  --log-root ./ci-logs \
-  --output-dir ./server-runs \
-  --workers 4 \
-  --rate-limit 60
+hound gate ./test-results \
+  --repo-dir . \
+  --baseline-ref origin/main \
+  --candidate-ref HEAD \
+  --policy ./quality-gate.yml \
+  --coverage ./coverage/coverage.json \
+  --sarif ./reports/semgrep.sarif \
+  --output gate-results.json
 ```
 
-| Endpoint | Purpose |
-|---|---|
-| `POST /analyze` | Submit a bounded analysis job |
-| `GET /jobs/<id>` | Read job state and result location |
-| `DELETE /jobs/<id>` | Cancel a queued or running job |
-| `GET /health` | Process liveness |
-| `GET /ready` | Readiness and queue availability |
-| `GET /stats` | Authenticated payload-free queue and engine counters |
+The local SQLite history store tracks outcomes, durations, branches, commits, and environments. Gate policies can evaluate new failures, flakiness, coverage delta, changed-line coverage, severity, and SARIF findings.
 
-Use `hound client submit`, `inspect`, `poll`, or `cancel` to operate the service. See [`docs/guides/server-deployment.md`](docs/guides/server-deployment.md) for proxy, service-unit, and recovery guidance.
-
-### GitHub Action
-
-The Docker Action accepts an artifact path, repository path, output directory, and trust options. Action paths must remain under `GITHUB_WORKSPACE`.
+### Run in GitHub Actions
 
 ```yaml
 - name: Run tests
@@ -325,7 +226,7 @@ The Docker Action accepts an artifact path, repository path, output directory, a
 
 - name: Investigate failure
   if: steps.tests.outcome == 'failure'
-  uses: youthisss/hound-tracer@v0.6.0
+  uses: youthisss/hound-tracer@v0.7.0
   with:
     log: artifacts/pytest.log
     repo: ${{ github.workspace }}
@@ -340,317 +241,9 @@ The Docker Action accepts an artifact path, repository path, output directory, a
     path: hound-output/
 ```
 
-See [`docs/guides/github-action.md`](docs/guides/github-action.md) for every input, output, permission, and upgrade rule.
+Action paths must stay under `GITHUB_WORKSPACE`. The [GitHub Action guide](docs/guides/github-action.md) documents inputs, outputs, permissions, and upgrades.
 
-### MCP server
-
-```sh
-hound-mcp
-# Equivalent CLI surface
-hound mcp
-```
-
-Available tools:
-
-| MCP tool | Purpose |
-|---|---|
-| `hound_analyze` | Analyze a file or directory, optionally with repository source and Git context |
-| `hound_log_command` | Run, capture, redact, and optionally analyze a command, returning its exit/timeout status and analysis directory |
-| `hound_check_gate` | Evaluate a quality-gate policy using test, coverage, SARIF, and optional history evidence |
-| `hound_get_insights` | Query test history and flakiness from an explicit store or output root |
-| `hound_doctor` | Check local readiness |
-| `hound_list_incidents` | Inspect deduplicated incidents from an explicit state store or output root |
-
-Set `HOUND_MCP_ROOTS` to the allowed filesystem roots. Every path argument, including `repo_dir`, history/state stores, policies, coverage, and SARIF inputs, must resolve under one of those roots. Command execution is disabled unless the MCP administrator explicitly sets `HOUND_MCP_ENABLE_COMMAND_EXECUTION=1`.
-
-The MCP response distinguishes protocol execution from the underlying diagnostic result. `isError: false` means the tool call completed; callers must still inspect fields such as `exit_code`, `timed_out`, and the quality-gate outcome. Failed command analysis includes `analysis.raw_output_dir`, while artifact analysis returns `raw_output_dir`, so agents do not need to guess where `report.json` was written. Directory analysis returns per-run results rather than one assumed root report.
-
-Useful non-default location parameters include:
-
-- `repo_dir` on `hound_analyze` for source context and Git enrichment.
-- `history_store` on `hound_check_gate` and `hound_get_insights`.
-- `output_dir` on `hound_get_insights` and `hound_list_incidents`.
-- `state_path` on `hound_list_incidents`.
-
-MCP input schemas reject empty command arrays, empty command arguments, non-finite timeouts, invalid history windows, excessive incident limits, unknown arguments, and paths outside the configured roots before dispatching into Hound services.
-
-## Command reference
-
-| Command | Purpose |
-|---|---|
-| `hound analyze` | Analyze one artifact or recursively analyze a directory |
-| `hound batch` | Process many artifacts with shared budgets and usage records |
-| `hound cli` | Open the persistent command session |
-| `hound console` | Open the Textual TUI |
-| `hound log` | Capture a command or piped stdin and optionally analyze failure |
-| `hound gate` | Evaluate tests, coverage, changed-line coverage, and SARIF |
-| `hound insights` | Import, export, query, and classify test history |
-| `hound serve` | Start the authenticated HTTP job service |
-| `hound client` | Submit, inspect, poll, or cancel server jobs |
-| `hound doctor` | Validate local readiness without exposing secrets |
-| `hound init` | Create project configuration and local Hound workspace |
-| `hound config` | Show, set non-secret values, or validate configuration |
-| `hound providers` | List built-in provider presets |
-| `hound auth` | Start an explicitly accepted subscription/OAuth login through an official provider CLI |
-| `hound models` | List or refresh a provider model catalog |
-| `hound runs` | List stored analysis runs |
-| `hound report` | Render a stored report as text, JSON, or Markdown |
-| `hound feedback` | Record reviews or export regression candidates |
-| `hound delivery` | Inspect and recover delivery-ledger records |
-| `hound incidents` | Inspect recurrence or invalidate cached RCA snapshots |
-| `hound install` | Install a skill, plugin, MCP configuration, or all supported components |
-| `hound uninstall` | Remove the package and optionally purge integrations or local data |
-| `hound mcp` | Start the stdio MCP service |
-| `hound clean` | Remove only output trees carrying Hound ownership markers |
-
-Run `hound <command> --help` for the authoritative option list.
-
-Commands with their own action groups expose another help level, for example `hound insights --help`, `hound delivery --help`, and `hound client submit --help`.
-
-### Common analysis examples
-
-```sh
-# Single artifact
-hound analyze failure.log --offline
-
-# Recursive directory, parallel workers
-hound analyze ./artifacts --jobs 4 --output-dir ./hound-output
-
-# Preview the bounded LLM prompt without making a provider request
-hound analyze failure.log --llm-preview
-
-# JSON presentation
-hound analyze failure.log --format json --output ./result.json
-
-# Optional delivery
-hound analyze failure.log --gh --slack-webhook
-```
-
-### Batch processing
-
-```sh
-hound batch \
-  --logs ./ci-logs \
-  --output-dir ./batch-output \
-  --jobs 8 \
-  --max-llm-calls 50 \
-  --max-cost-usd 5.00
-```
-
-Batch mode writes a classification summary and usage record. When a call or cost budget is exhausted, remaining files use deterministic fallback and are marked `budget_skipped`.
-
-### Command capture
-
-```sh
-hound log -- npm test
-hound log --name unit-tests -- pytest -q
-kubectl logs deployment/api -n prod | hound log --name api-deploy
-hound log --analyze --offline -- cargo test
-```
-
-Commands run without a shell, but the executable and project hooks can still perform arbitrary actions. Captured output is redacted by default and bounded. Supplying raw-console or unredacted options weakens that protection and should be restricted to controlled evidence.
-
-`hound log` returns the wrapped command's exit code. Add `--analyze` when the captured evidence should immediately enter the analysis pipeline. Piped stdin can be captured with `--name`, but it has no child-process exit status to preserve.
-
-### Administration
-
-```sh
-hound runs --output-dir hound-output
-hound report <run-directory> --format markdown
-hound incidents list --output-dir hound-output --json
-hound incidents inspect --output-dir hound-output --key <dedup-key> --json
-hound incidents invalidate --output-dir hound-output --key <dedup-key> --yes
-
-hound delivery list --output-dir hound-output --json
-hound delivery inspect --output-dir hound-output --incident-key <key> --destination github --json
-hound delivery reconcile --output-dir hound-output --incident-key <key> --destination github --external-id <id>
-hound delivery mark-failed --output-dir hound-output --incident-key <key> --destination github --error "verified absent" --confirm-absent
-hound delivery retry-failed --output-dir hound-output --incident-key <key> --destination jira
-
-hound clean --output-dir hound-output --yes
-```
-
-## Configuration and providers
-
-Create `.hound.yml`, then validate it before analysis:
-
-```sh
-hound init
-hound config validate --config .hound.yml
-hound config show
-```
-
-Resolution order is:
-
-```text
-CLI flags → YAML configuration → generic HOUND_* environment variables
-→ provider-specific environment variables → offline fallback rules
-```
-
-`hound config set` is intended for non-sensitive values such as provider and model. Store credentials in provider environment variables or the system keyring, not in source-controlled YAML.
-
-### Starter configuration
-
-```yaml
-llm:
-  provider: gemini
-  model: auto
-  temperature: 0.2
-  timeout: 120.0
-  max_retries: 3
-  max_concurrency: 4
-  routing: exclude-kinds
-  skip_kinds: [flaky, timeout]
-  pricing:
-    default:
-      prompt_per_mtok: 0.15
-      completion_per_mtok: 0.60
-
-redact: true
-
-trust:
-  source_class: local_artifact
-
-components:
-  "services/billing/**": team-billing
-  "services/auth/**": team-security
-  "k8s/**": platform-infra
-
-dedup:
-  backend: sqlite
-  state_file: .hound/state.sqlite3
-  max_entries: 50000
-  retention_days: 90
-  reuse: true
-  reuse_after_occurrences: 3
-
-policy:
-  recurrence_threshold: 3
-  severity_overrides:
-    production:
-      deployment_failed: critical
-      oom_killed: critical
-
-observability:
-  prometheus_url: https://prometheus.internal
-  tempo_url: https://tempo.internal
-  window_minutes: 15
-
-runbooks:
-  api: https://runbooks.internal/services/api.md
-
-github:
-  repo: my-org/my-repo
-jira:
-  url: https://jira.example.com
-  project: PROJ
-gitlab:
-  url: https://gitlab.com
-  project: my-org/my-repo
-slack:
-  webhook_url: https://hooks.slack.com/services/...
-```
-
-### Provider presets
-
-Hound talks to OpenAI-compatible endpoints. Anthropic use requires an OpenAI-compatible proxy.
-
-| Preset | Credential | Default endpoint |
-|---|---|---|
-| `openai` | `OPENAI_API_KEY` | `https://api.openai.com/v1` |
-| `anthropic` | `ANTHROPIC_API_KEY`, `ANTHROPIC_BASE_URL` | Proxy supplied by operator |
-| `gemini` | `GEMINI_API_KEY` | `https://generativelanguage.googleapis.com/v1beta/openai` |
-| `groq` | `GROQ_API_KEY` | `https://api.groq.com/openai/v1` |
-| `ollama` | None by default | `http://localhost:11434/v1` |
-| `deepseek` | `DEEPSEEK_API_KEY` | `https://api.deepseek.com/v1` |
-| `azure` | `AZURE_OPENAI_API_KEY`, `AZURE_OPENAI_BASE_URL` | Resource-specific |
-| `9router` | `NINE_ROUTER_API_KEY` | `http://127.0.0.1:20128/v1` |
-| `custom` | `CUSTOM_API_KEY`, `CUSTOM_BASE_URL` | Operator-supplied |
-
-Generic overrides include `HOUND_API_PROVIDER`, `HOUND_API_KEY`, `HOUND_BASE_URL`, `HOUND_MODEL`, `HOUND_TEMPERATURE`, `HOUND_TIMEOUT`, `HOUND_MAX_TOKENS`, `HOUND_MAX_RETRIES`, `HOUND_MAX_CONCURRENCY`, `HOUND_REQUIRE_LLM`, and `HOUND_SOURCE_CLASS`.
-
-```sh
-hound providers
-hound models --provider groq --refresh
-```
-
-`model: auto` never triggers surprise network discovery during analysis. It resolves from a configured model, a custom-provider default, or a catalog previously cached by `hound models --refresh`. Providers that cannot expose a generic model catalog, including Anthropic and Azure, require an explicit model or deployment.
-
-Advanced users can add provider definitions to the platform-specific Hound configuration directory as `providers.yml`. Custom entries support `openai` and `anthropic` protocols, bounded model lists, a default model, and an explicit model-discovery capability. Use `hound providers --json` to inspect the effective registry without exposing credentials.
-
-If a provider fails, times out, returns an invalid schema, or reaches its retry limit, Hound records `llm_status` and `fallback_reason`, then uses deterministic RCA unless `require_llm` is enabled.
-
-### Subscription sessions through provider CLIs
-
-Hound can invoke existing Codex, Claude Code, or Gemini CLI sessions through the `openai-oauth`, `claude-oauth`, and `gemini-oauth` provider IDs. This path is separate from API-key providers and requires the matching official CLI on `PATH`.
-
-```sh
-# Read and explicitly accept Hound's account-risk notice, then start login
-hound auth login openai-oauth --accept-risk
-
-# Select the subscription provider for analysis
-hound config set provider openai-oauth
-hound analyze failure.log
-```
-
-Subscription session use may conflict with provider terms or account policies. Hound refuses this path until the risk notice has been explicitly accepted for that provider. Prefer a supported API key or local endpoint when account-policy certainty matters.
-
-## Quality gates and test insights
-
-### Test history
-
-The local SQLite history store tracks outcomes, durations, branches, commits, environments, failure rates, and p95 duration.
-
-```sh
-hound insights import ./junit.xml \
-  --test-runner pytest \
-  --branch main \
-  --commit abc1234 \
-  --environment "os=linux;python=3.11"
-
-hound insights stats tests/test_payment.py test_checkout_idempotency
-hound insights history tests/test_payment.py test_checkout_idempotency --window-days 30
-hound insights tests --suite-prefix tests/unit/
-```
-
-### Quality gate
-
-```sh
-hound gate ./test-results \
-  --repo-dir . \
-  --baseline-ref origin/main \
-  --candidate-ref HEAD \
-  --policy ./quality-gate.yml \
-  --coverage ./coverage/coverage.json \
-  --baseline-coverage ./coverage/baseline-coverage.json \
-  --sarif ./reports/semgrep.sarif \
-  --output gate-results.json
-```
-
-Example policy:
-
-```yaml
-version: "1.0"
-rules:
-  new_failure: block
-  flaky: warn
-  coverage_delta:
-    outcome: block
-    threshold_percent: -2.0
-  changed_line_coverage:
-    outcome: block
-    threshold_percent: 80.0
-    include: ["src/**"]
-    exclude: ["tests/**", "docs/**"]
-  critical_sarif: block
-  sarif_warning: warn
-```
-
-Gate exit codes are `0` for pass or accepted warning, `1` for a policy block, and `2` for invalid input or policy.
-
-## CI, Docker, and coding-agent integration
-
-### Docker
+### Run with Docker
 
 ```sh
 docker build -t hound-tracer .
@@ -660,224 +253,258 @@ docker run --rm \
   hound-tracer analyze /logs --output-dir /out --offline
 ```
 
-The release image runs the main Hound process as a non-root user. Docker availability remains a separate CI or release gate when the local development host has no daemon.
+The release image runs the main Hound process as a non-root user.
 
-### Coding harnesses
+## Interfaces
 
-Hound's installer is limited to packaged skills, supported plugins, and MCP configuration for OpenCode V2, Hermes Agent, Claude Code, Codex, Cursor, and Antigravity. It does not install standalone command aliases, hooks, or unrelated harness settings.
+| Interface | Start it | Intended use |
+|---|---|---|
+| Launcher | `hound` | Choose the TUI, persistent CLI, or local HTTP service |
+| CLI | `hound analyze ...` | Scripts, CI, and direct artifact analysis |
+| Persistent CLI | `hound cli` | Command completion, history, help, and repeated local work |
+| Terminal UI | `hound console` | Browse artifacts, run projects, inspect reports, and review QA history |
+| HTTP service | `hound serve` | Authenticated queued analysis behind a controlled reverse proxy |
+| GitHub Action | `uses: youthisss/hound-tracer@v0.7.0` | Failure investigation in GitHub workflows |
+| MCP server | `hound-mcp` or `hound mcp` | Bounded diagnostic tools for coding agents |
+
+### Terminal UI
 
 ```sh
-hound install --help
-hound uninstall --help
+hound console --logs ./ci-logs --offline
 ```
 
-Use `hound install` to select one component or every component supported by the target harness:
+The Textual UI has Home, Artifacts, Project Runs, Results, and Quality workspaces. Stored runs expose Overview, Report, Ticket, Context, and Raw log views. The **Run project** action requires confirmation and uses a bounded timeout and output capture, but the invoked project remains unsandboxed.
+
+### HTTP service
 
 ```sh
-# Skill only
+export HOUND_SERVER_TOKEN="replace-with-a-long-random-token"
+
+hound serve \
+  --host 127.0.0.1 \
+  --port 8123 \
+  --log-root ./ci-logs \
+  --output-dir ./server-runs
+```
+
+The service binds to loopback, uses Bearer authentication, and persists its queue in SQLite. It provides job submission, inspection, cancellation, health, readiness, and authenticated statistics endpoints. Put a controlled reverse proxy in front of it for TLS or remote ingress. See [server deployment](docs/guides/server-deployment.md).
+
+### Coding agents and MCP
+
+```sh
+hound-mcp
+```
+
+The MCP surface exposes bounded tools for:
+
+- artifact analysis and command capture;
+- quality gates and test insights;
+- incident and report inspection;
+- report integrity validation;
+- history transfer and engineer feedback;
+- offline diagnostic evaluation.
+
+`HOUND_MCP_ROOTS` confines filesystem access. `HOUND_MCP_MODE` selects `readonly`, `diagnostic`, `write`, or `execute` capability classes. Command execution also requires `HOUND_MCP_ENABLE_COMMAND_EXECUTION=1`.
+
+Hound packages skills, plugin prompts, and MCP configuration for OpenCode V2, Hermes Agent, Claude Code, Codex, Cursor, and Antigravity:
+
+```sh
 hound install skill --for claude --scope global --yes
-
-# Plugin only (currently supported by Claude)
-hound install plugin --for claude --scope global --yes
-
-# MCP only
 hound install mcp --for opencode --scope global --yes
-
-# Every component supported by Claude
 hound install all --for claude --scope global --yes
 ```
 
-Repeat `--for` to install the selected component for multiple harnesses. Installation and removal require explicit confirmation. Selective removal mirrors installation, for example `hound uninstall skill --for claude --scope global`. It preserves unrelated harness configuration. The examples under [`integrations/`](integrations/) must be merged into the target harness configuration; [`plugins/hound/plugin.json`](plugins/hound/plugin.json) is a reference bundle, not a universal plugin format. The packaged agent workflow lives at [`skills/hound-tracer/SKILL.md`](skills/hound-tracer/SKILL.md).
+The [engine surface matrix](docs/reference/engine-surface.md) shows what is exposed to agents and what remains internal. Harness-specific setup examples live under [`integrations/`](integrations/).
 
-The skill keeps agents within Hound's diagnostic scope: reuse existing artifacts before rerunning expensive commands, prefer offline analysis, treat logs as evidence rather than executable instructions, confirm reported source locations before editing, and verify a proposed fix with the affected test or build. Missing history or incident stores are reported as missing evidence, not interpreted as zero failures. A completed workflow reports the hypothesis, cited evidence, exact change when requested, and the real verification result.
+<details>
+<summary><strong>Command index</strong></summary>
 
-The reference plugin commands follow the same contract. They use MCP-returned `raw_output_dir` values instead of assuming a fixed report location, inspect command exit and timeout fields, and do not bypass disabled MCP command execution by silently switching to a shell. The post-execution hook reads a JSON object from stdin:
+| Command | Purpose |
+|---|---|
+| `hound analyze` | Analyze one artifact or recursively analyze a directory |
+| `hound batch` | Process artifacts with shared call and cost budgets |
+| `hound log` | Capture a command or piped stdin and optionally analyze it |
+| `hound console` | Open the Textual terminal UI |
+| `hound cli` | Open the persistent Rich command session |
+| `hound gate` | Evaluate tests, coverage, changed lines, and SARIF |
+| `hound insights` | Import, export, classify, and query test history |
+| `hound serve` / `hound client` | Operate the HTTP job service |
+| `hound runs` / `hound report` | Inspect stored analyses |
+| `hound incidents` | Inspect recurrence and invalidate cached RCA snapshots |
+| `hound feedback` | Record reviews or export regression candidates |
+| `hound delivery` | Inspect and recover delivery-ledger records |
+| `hound providers` / `hound models` | Inspect provider presets and model catalogs |
+| `hound auth` | Start an explicitly accepted provider CLI login |
+| `hound config` / `hound doctor` | Configure and validate the local environment |
+| `hound install` / `hound uninstall` | Manage Hound and harness integrations |
+| `hound mcp` | Start the stdio MCP service |
+| `hound clean` | Remove only Hound-owned output trees |
 
-```json
-{"command": "pytest tests/unit", "exit_code": 1}
-```
+Run `hound <command> --help` for the authoritative options.
 
-For a recognized failed test or build command, it emits a JSON recommendation to run Hound analysis. It emits nothing for successful or unrelated commands and does not echo the original command arguments, which may contain sensitive values. Harness adapters are responsible for mapping their native event payload to this two-field contract.
+</details>
 
-Source copies under [`skills/`](skills/) and [`plugins/`](plugins/) are mirrored in `src/hound/integration_assets/` for package installation. Tests enforce that packaged integration assets remain identical to their reference files.
+## Analysis contract
 
-### Uninstall
+### Accepted evidence
 
-Preview integration cleanup or full package removal before changing the environment:
+| Input | Notes |
+|---|---|
+| `.log` | Build, test, CI, deployment, or container output |
+| JUnit `.xml` | Suites, cases, failures, errors, skips, and durations |
+| `.sarif` | SARIF 2.1.0 findings from supported producers |
+| Test-report `.json` | Recognized structured reports in report-bearing paths |
+| Piped stdin | Captured through `hound log --name <name>` |
+| Git checkout | Optional diff, blame, commits, CODEOWNERS, source, and impact context |
+
+Directory analysis is recursive. Hound prunes dependency trees, virtual environments, VCS metadata, generated results, state, common caches, and symlinked paths.
+
+### Exit codes
+
+| Code | Analysis meaning |
+|---:|---|
+| `0` | Analysis completed and no actionable failure was detected |
+| `1` | Analysis completed and detected a failure |
+| `2` | Invalid arguments, configuration, or input |
+| `3` | Internal execution, I/O, or required delivery failure |
+
+`hound log` normally preserves the wrapped command's exit code. A timeout uses `124`; cancellation uses `130`. Quality-gate exit codes are documented in [architecture](docs/architecture.md#qa-quality-gate).
+
+### Supported failure areas
+
+Hound classifies failures across build, test, CI, deployment, containers, Kubernetes, network, and TLS workflows. Stack framing covers Python, Go, Rust, Java, JavaScript and TypeScript V8 output, C and C++, C#, YAML, Terraform, and template locations. Test ingestion recognizes pytest, Jest, Vitest, Go test, RSpec, Cargo test, dotnet test, and JUnit XML.
+
+Optional connectors collect bounded read-only Kubernetes, Helm, Prometheus, and Tempo-compatible evidence after explicit configuration and trust checks. See [deployment connectors](docs/guides/deployment-connectors.md) and [operational correlation](docs/operations/operational-correlation.md).
+
+## Configuration and model providers
+
+Start with an offline project configuration:
 
 ```sh
-hound uninstall skill --for claude --scope global --dry-run
-hound uninstall --remove-components --purge-project --purge-user-data --dry-run
+hound init
+hound config validate --config .hound.yml
+hound config show
 ```
 
-Rerun without `--dry-run` and confirm the prompt to apply the removal. Non-interactive environments require `--yes`. By default, `hound uninstall` removes only the Python package; project workspaces, configuration, model caches, and harness integrations are retained unless their corresponding removal options are supplied. Select an installer explicitly with `--package-manager uv`, `pipx`, or `pip` if automatic detection does not match the original installation method.
+Configuration resolves in this order:
 
-## Security and trust boundaries
+```text
+CLI flags → YAML configuration → HOUND_* environment variables
+          → provider-specific environment variables → offline fallback
+```
 
-### What Hound protects
+Hound supports built-in presets for OpenAI, Anthropic-compatible endpoints, Gemini, Groq, Ollama, DeepSeek, Azure OpenAI, 9router, and custom endpoints. It can also invoke explicitly accepted Codex, Claude Code, or Gemini CLI subscription sessions. Subscription use may conflict with provider terms or account policies, so Hound requires explicit risk acceptance.
 
-- Redaction is enabled by default before supported content reaches prompts, reports, tickets, dedup snapshots, or delivery payloads.
-- Recognized patterns include private keys, bearer tokens, JWTs, provider credentials, passwords, connection strings, email addresses, IPv4 addresses, and IPv6 addresses.
-- Artifact and response reads are bounded. XML parsing disables external entities.
-- Output paths, sensitive stores, and command captures reject unsafe symlink paths where applicable and use atomic persistence for critical state.
+```sh
+hound providers
+hound models --provider groq --refresh
+```
+
+Store credentials in provider environment variables or the system keyring, not in source-controlled YAML. If a provider fails, times out, exhausts retries, or returns an invalid result, Hound records the status and uses deterministic fallback unless `require_llm` is enabled.
+
+<details>
+<summary><strong>Minimal online configuration</strong></summary>
+
+```yaml
+llm:
+  provider: gemini
+  model: auto
+  temperature: 0.2
+  timeout: 120.0
+  max_retries: 3
+  max_concurrency: 4
+
+redact: true
+
+trust:
+  source_class: local_artifact
+
+dedup:
+  backend: sqlite
+  state_file: .hound/state.sqlite3
+  retention_days: 90
+  reuse: true
+  reuse_after_occurrences: 3
+```
+
+`model: auto` uses configured or cached catalog data. It does not make an unexpected discovery request during analysis.
+
+</details>
+
+## Security boundary
+
+Hound treats artifacts, repositories, model output, and external services as separate trust boundaries.
+
+### Protections built into Hound
+
+- Offline mode makes no provider request.
+- Redaction runs before supported content reaches prompts, reports, tickets, dedup snapshots, or delivery payloads.
+- Artifact, command-output, provider-response, and connector reads are bounded.
+- XML parsing disables external entities.
 - Fork PR trust mode forces offline analysis, keeps redaction enabled, and disables source context, enrichment, and delivery.
-- Provider and delivery clients reject redirects, bound responses, cap retries, and separate external errors from evidence.
-- The HTTP server authenticates protected routes, limits requests and queue admission, and binds to loopback.
+- Output and sensitive state paths reject unsafe symlinks where applicable and use atomic persistence for critical state.
+- Provider and delivery clients reject redirects, bound responses, and cap retries.
 - `hound clean` removes only directories carrying Hound ownership markers.
 
-### What Hound cannot guarantee
+### Limits you must account for
 
 - Pattern redaction cannot identify every encoded, fragmented, novel, or application-specific secret.
-- Original artifacts remain unchanged and may still contain sensitive data.
-- LLM output remains probabilistic even after schema and evidence-reference validation.
-- Command execution is not sandboxed. Child processes can read files, credentials, and network resources available to the Hound process and may modify the checkout.
-- Running without `shell=True` prevents a shell-injection class; it does not make a project script safe.
-- TLS, public ingress, multi-instance rate limiting, host permissions, backup encryption, and isolation of untrusted checkouts remain operator responsibilities.
+- Original artifacts are not rewritten and may still contain sensitive data.
+- LLM output remains probabilistic after schema and evidence-reference validation.
+- Command execution is not sandboxed. Child processes inherit the Hound process permissions.
+- TLS, public ingress, host permissions, backup encryption, and untrusted-checkout isolation remain operator responsibilities.
 
-Use `--offline` for local-only analysis. Use an external container, VM, restricted account, or disposable runner when executing commands from an untrusted checkout.
+Use an external container, VM, restricted account, or disposable runner when executing commands from an untrusted checkout. Read the [threat model](docs/operations/threat-model.md) and [bounded-operation limits](docs/benchmarks/limits.md) before production deployment.
 
-### Trust profiles
-
-| Source class | Intended use | Restrictions |
+| Source class | Intended use | Enforced behavior |
 |---|---|---|
-| `trusted_branch` | Controlled branch or internal evidence | Optional LLM, source context, enrichment, and delivery allowed by configuration |
+| `trusted_branch` | Controlled internal evidence | Configured external capabilities may run |
 | `local_artifact` | Default local evidence | Explicit options control external capabilities |
-| `fork_pr` | Untrusted public-fork evidence | Offline only, redaction locked on, no source context, enrichment, or delivery |
+| `fork_pr` | Untrusted public-fork evidence | Offline, redacted, no source context, enrichment, or delivery |
 
-### Vulnerability reporting
+Report suspected vulnerabilities through [GitHub Security Advisories](https://github.com/youthisss/hound-tracer/security/advisories/new), not a public issue. See [`SECURITY.md`](SECURITY.md).
 
-Do not open a public issue for a suspected vulnerability or credential leak. Use [GitHub Security Advisories](https://github.com/youthisss/hound-tracer/security/advisories/new) or the maintainer contact listed in [`SECURITY.md`](SECURITY.md). Scrub credentials from reproduction artifacts.
+## Documentation
 
-## Supported failures and ecosystems
-
-| Stage | Failure kinds and examples |
+| Document | Covers |
 |---|---|
-| Build | `compilation_error`, `import_error`, `dependency_resolution`, `config_missing` |
-| Test | `test_failure`, `timeout`, verified rerun-then-pass `flaky` behavior |
-| CI | `ci_failure`, `disk_full`, `api_rate_limited`, `permission_error` |
-| Deployment | `deployment_failed`, `rollback`, `readiness_timeout`, `migration_failed` |
-| Container and Kubernetes | `oom_killed`, `crash_loop`, `image_pull_error`, `registry_auth_failure`, `scheduling_failed`, `quota_exceeded`, `liveness_probe_failed`, `readiness_probe_failed` |
-| Network and TLS | `network_failure`, `tls_certificate_error` |
+| [Documentation index](docs/README.md) | Entry point for guides, references, and operations |
+| [Architecture](docs/architecture.md) | Pipeline, contracts, failure policy, and test strategy |
+| [Support matrix](docs/support-matrix.md) | Tested runtimes, operating systems, and external gates |
+| [GitHub Action guide](docs/guides/github-action.md) | Action inputs, outputs, permissions, and upgrades |
+| [Server deployment](docs/guides/server-deployment.md) | Reverse proxy, TLS boundary, backup, and recovery |
+| [Deployment connectors](docs/guides/deployment-connectors.md) | Kubernetes and Helm collection boundaries |
+| [Engine surface matrix](docs/reference/engine-surface.md) | Skill, plugin, MCP, and internal capabilities |
+| [MCP SDK migration](docs/reference/mcp-sdk-migration.md) | Current protocol boundary and official SDK exit criteria |
+| [Source intelligence](docs/reference/source-intelligence.md) | Source, ownership, and Git evidence |
+| [Test impact](docs/reference/test-impact.md) | Advisory test-impact graph contract |
+| [Timeline schema](docs/reference/timeline-schema.md) | Timeline and causal-link fields |
+| [Threat model](docs/operations/threat-model.md) | Assets, controls, outbound network, and residual risk |
+| [Delivery reliability](docs/operations/delivery-reliability.md) | Idempotency, ambiguous outcomes, and recovery |
+| [State recovery](docs/operations/state-recovery.md) | Backup and restoration of persistent state |
+| [Changelog](CHANGELOG.md) | Releases, migrations, and compatibility changes |
 
-Stack framing covers Python, Go, Rust, Java, JavaScript and TypeScript V8 output, C and C++, C#, plus relevant YAML, Terraform, and template locations. Test ingestion recognizes pytest, Jest, Vitest, Go test, RSpec, Cargo test, dotnet test, and JUnit XML.
-
-Optional deployment context supports bounded read-only Kubernetes and Helm commands. Optional observability context supports Prometheus and Tempo-compatible endpoints. These connectors require explicit configuration, a trusted source classification, and available external runtimes.
-
-## Operations and state
-
-### Deduplication
-
-Normalized failure evidence produces a SHA-256 incident fingerprint. The default SQLite backend uses WAL mode for concurrent workers, recurrence counters, bounded retention, and RCA snapshot reuse. The cache key includes source digest, model, prompt implementation, policy, and project scope.
-
-### Feedback
-
-```sh
-hound feedback record \
-  --run-id run-abc1234 \
-  --usefulness useful \
-  --actual-kind test_failure
-
-hound feedback export --candidate-fixtures --output candidate-fixtures.json
-```
-
-Reviewed feedback can improve known-issue matching and create candidate regression fixtures. It does not silently retrain a model.
-
-### Delivery reliability
-
-Delivery is opt-in. The SQLite ledger assigns idempotency keys and preserves ambiguous network outcomes so Hound does not blindly create duplicate external tickets. Operators must reconcile unknown outcomes before retrying.
-
-### Server state
-
-The server queue persists in SQLite. Environment controls include `HOUND_SERVER_TOKEN`, `HOUND_SERVER_WORKERS`, `HOUND_SERVER_MAX_QUEUE`, `HOUND_SERVER_RATE_LIMIT`, and `HOUND_SERVER_JOB_TTL`. See [`docs/operations/state-recovery.md`](docs/operations/state-recovery.md) before repairing or replacing state files.
-
-### Bounded operations
-
-Hound caps file reads, provider responses, delivery responses, artifact discovery, prompt evidence, retries, queues, and captured command output. Current limits and benchmark rationale are documented in [`docs/benchmarks/limits.md`](docs/benchmarks/limits.md).
-
-## Development and verification
+## Development
 
 ```sh
 git clone https://github.com/youthisss/hound-tracer.git
 cd hound-tracer
 uv sync --extra dev
 
-# Formatting and static checks
 uv run ruff check src tests
 uv run mypy src/hound
-
-# Test boundaries
 uv run pytest -m "unit and not slow" -q
 uv run pytest -m integration -q
 uv run pytest -m "e2e and not slow" -q
-
-# Full suite and coverage gate
-uv run pytest
 uv run pytest --cov=hound --cov-report=term --cov-fail-under=80 -q
-
-# Offline diagnostic accuracy evaluation
 uv run python -m hound.eval --offline --check --format json
 ```
 
-Test markers identify the dominant boundary: `unit`, `integration`, `e2e`, `slow`, and `network`. Localhost HTTP tests are integration tests, not network tests.
-
-Contributions should use type-annotated Python, preserve deterministic offline behavior, keep redaction enabled by default, keep machine-readable stdout clean, and never commit secrets or private logs. Use Conventional Commit prefixes such as `feat:`, `fix:`, `docs:`, and `test:`. Read [`CONTRIBUTING.md`](CONTRIBUTING.md) and the [dependency policy](docs/operations/dependency-policy.md) before opening a pull request.
-
-## Repository structure
-
-```text
-src/hound/
-├── cli.py             command parsing and adapter dispatch
-├── rich_cli.py        persistent Rich command session
-├── launcher.py        bare-command interface launcher
-├── tui.py             Textual terminal application
-├── service.py         shared analysis and project-run services
-├── pipeline.py        RCA pipeline orchestration
-├── collector.py       bounded subprocess and stdin capture
-├── server.py          HTTP service and SQLite job queue
-├── config.py          strict configuration and provider presets
-├── models.py          RCA Document Schema v2.0 validation
-├── trust.py           source trust policies
-├── feedback.py        review feedback and fixture export
-├── eval.py            diagnostic regression evaluator
-├── analyze/           LLM adapter, prompts, fallback, cost control
-├── ingest/            parsers, redaction, framing, Git context
-├── triage/            severity, component mapping, deduplication
-├── qa/                history, coverage, SARIF, quality gates
-├── devops/            timeline and incident correlation
-├── connectors/        deployment and observability evidence
-├── integration_assets/ packaged skill and plugin sources
-├── source/            source context and test-impact analysis
-├── mcp/               bounded coding-agent tools
-└── output/            reports, tickets, connectors, delivery ledger
-```
-
-## Documentation map
-
-| Document | Covers |
-|---|---|
-| [`docs/README.md`](docs/README.md) | Documentation index |
-| [`docs/architecture.md`](docs/architecture.md) | Pipeline, contracts, and module boundaries |
-| [`docs/support-matrix.md`](docs/support-matrix.md) | Tested runtimes, operating systems, and external gates |
-| [`docs/guides/github-action.md`](docs/guides/github-action.md) | Action inputs, outputs, trust, and upgrades |
-| [`docs/guides/server-deployment.md`](docs/guides/server-deployment.md) | Reverse proxy, TLS boundary, and service operation |
-| [`docs/guides/deployment-connectors.md`](docs/guides/deployment-connectors.md) | Kubernetes, Helm, Prometheus, and Tempo evidence |
-| [`docs/reference/log-format.md`](docs/reference/log-format.md) | Collector logs and metadata sidecars |
-| [`docs/reference/source-intelligence.md`](docs/reference/source-intelligence.md) | Source context and ownership evidence |
-| [`docs/reference/test-impact.md`](docs/reference/test-impact.md) | Advisory test-impact graph contract |
-| [`docs/reference/timeline-schema.md`](docs/reference/timeline-schema.md) | Timeline event schema |
-| [`docs/reference/schema-migration-v1.4-to-v2.0.md`](docs/reference/schema-migration-v1.4-to-v2.0.md) | RCA schema migration |
-| [`docs/operations/threat-model.md`](docs/operations/threat-model.md) | Assets, trust boundaries, controls, residual risk |
-| [`docs/operations/delivery-reliability.md`](docs/operations/delivery-reliability.md) | Delivery ledger and recovery |
-| [`docs/operations/state-recovery.md`](docs/operations/state-recovery.md) | Persistent state recovery |
-| [`docs/operations/operations-metrics.md`](docs/operations/operations-metrics.md) | Operational metrics |
-| [`docs/operations/operational-correlation.md`](docs/operations/operational-correlation.md) | Cross-signal correlation |
-| [`docs/benchmarks/limits.md`](docs/benchmarks/limits.md) | Resource bounds and benchmark evidence |
-| [`CHANGELOG.md`](CHANGELOG.md) | Release history and migrations |
-| [`SECURITY.md`](SECURITY.md) | Supported versions and private disclosure |
+Contributions should preserve deterministic offline behavior, default redaction, bounded operations, and clean machine-readable output. Read [`CONTRIBUTING.md`](CONTRIBUTING.md) and the [dependency policy](docs/operations/dependency-policy.md) before opening a pull request.
 
 ## Project status
 
-Hound Tracer `0.6.0` is beta software. CPython 3.10, 3.11, and 3.12 are supported. The current support contract, pending platform evidence, and external release gates are maintained in [`docs/support-matrix.md`](docs/support-matrix.md). Version history follows [Semantic Versioning](https://semver.org/) and is recorded in [`CHANGELOG.md`](CHANGELOG.md).
+Hound Tracer `0.7.0` is beta software. CPython 3.10, 3.11, 3.12, and 3.13 are supported. Platform evidence and external release gates are tracked in the [support matrix](docs/support-matrix.md). Releases follow [Semantic Versioning](https://semver.org/) and are recorded in the [changelog](CHANGELOG.md).
 
 ## License
 
