@@ -2,7 +2,7 @@ from pathlib import Path
 
 
 def test_nginx_example_enforces_server_boundary():
-    config = Path("tests/fixtures/nginx-hound.conf").read_text(encoding="utf-8")
+    config = Path("docs/examples/nginx-hound.conf").read_text(encoding="utf-8")
     for directive in (
         "listen 443 ssl",
         "client_max_body_size 1m",

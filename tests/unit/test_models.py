@@ -137,7 +137,7 @@ def test_validator_rejects_forged_or_non_finite_analysis_values(mutation, messag
 
 
 def test_schema_document_publishes_v2_analysis_contract():
-    schema = json.loads(Path("tests/fixtures/rca-v2.0.schema.json").read_text(encoding="utf-8"))
+    schema = json.loads(Path("docs/schema/rca-v2.0.schema.json").read_text(encoding="utf-8"))
     assert schema["properties"]["schema_version"] == {"const": "2.0"}
     assert schema["additionalProperties"] is False
     for section in ("meta", "failure", "context", "root_cause", "triage", "ticket"):
@@ -148,7 +148,7 @@ def test_schema_document_publishes_v2_analysis_contract():
 
 
 def test_current_writer_matches_published_json_schema():
-    schema = json.loads(Path("tests/fixtures/rca-v2.0.schema.json").read_text(encoding="utf-8"))
+    schema = json.loads(Path("docs/schema/rca-v2.0.schema.json").read_text(encoding="utf-8"))
     Draft202012Validator.check_schema(schema)
     artifacts = make_artifacts("pytest_fail.log")
     root_cause = build_root_cause(artifacts)
