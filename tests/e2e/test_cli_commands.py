@@ -191,6 +191,44 @@ def test_log_uses_initialized_capture_and_result_directories(tmp_path, monkeypat
     assert any(path.is_dir() for path in (tmp_path / ".hound" / "results").iterdir())
 
 
+def test_run_project_captures_output_and_record(tmp_path, capsys):
+    assert main([
+        "run", "--directory", str(tmp_path), "--json", "--",
+        sys.executable, "-c", "print('project output')",
+    ]) == 0
+
+    record = json.loads(capsys.readouterr().out)
+    assert record["status"] == "passed"
+    assert Path(record["capture"]).read_text(encoding="utf-8").strip() == "project output"
+    assert (tmp_path / ".hound" / "runs" / f"{record['run_id']}.json").is_file()
+
+
+def test_run_project_preserves_child_exit_code(tmp_path, capsys):
+    assert main([
+        "run", "--directory", str(tmp_path), "--",
+        sys.executable, "-c", "raise SystemExit(7)",
+    ]) == 7
+    assert "status   : failed" in capsys.readouterr().out
+
+
+def test_run_detect_lists_shared_manifest_suggestions(tmp_path, capsys):
+    (tmp_path / "pyproject.toml").write_text('[tool.pytest.ini_options]\ntestpaths = ["tests"]\n', encoding="utf-8")
+
+    assert main(["run", "--directory", str(tmp_path), "--detect", "--json"]) == 0
+
+    suggestions = json.loads(capsys.readouterr().out)
+    assert {item["label"] for item in suggestions} == {"pytest"}
+    assert suggestions[0]["command"] == ["pytest", "-q"]
+
+
+def test_run_rejects_timeout_above_service_limit(tmp_path, capsys):
+    assert main([
+        "run", "--directory", str(tmp_path), "--timeout", "3601", "--",
+        sys.executable, "-c", "print('not run')",
+    ]) == 2
+    assert "timeout must be between 1 and 3600 seconds" in capsys.readouterr().err
+
+
 def test_exit_codes_success_failure_and_internal_error(tmp_path, monkeypatch):
     logs = tmp_path / "logs"
     logs.mkdir()

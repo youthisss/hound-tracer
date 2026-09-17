@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.7.1] - 2026-09-17
+
+### Added
+- Added `hound run` for bounded project-command execution, manifest-based command
+  suggestions, redacted capture, artifact discovery, persistent run records, and
+  optional immediate analysis.
+
+### Changed
+- Shared project-command discovery between the CLI and TUI.
+
 ## [0.7.0] - 2026-09-17
 
 ### Added
