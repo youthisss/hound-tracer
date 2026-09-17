@@ -508,35 +508,22 @@ def build_parser() -> argparse.ArgumentParser:
                          help="trust profile for the captured artifact")
     _add_llm_args(log_cmd)
     log_cmd.add_argument("command_args", nargs=argparse.REMAINDER, metavar="COMMAND")
-    integrations_cmd = sub.add_parser("integrations", help="install Hound skills and MCP configuration for coding harnesses")
-    integrations_sub = integrations_cmd.add_subparsers(dest="integrations_command", required=True)
-    integrations_detect = integrations_sub.add_parser("detect", help="show coding harnesses found on this machine")
-    integrations_detect.add_argument("--json", action="store_true", help="output JSON")
-    integrations_install = integrations_sub.add_parser("install", help="install integrations after explicit confirmation")
-    integrations_install.add_argument("harnesses", nargs="*", metavar="HARNESS")
-    integrations_install.add_argument("--detect", action="store_true", help="target every detected harness")
-    integrations_install.add_argument("--scope", choices=("global", "project"), default="global")
-    integrations_install.add_argument(
-        "--component", choices=("skill", "plugin", "mcp"), action="append", dest="components",
-        help="install only this component; repeat to select multiple (default: all)",
-    )
-    integrations_install.add_argument("--dry-run", action="store_true", help="show files without writing them")
-    integrations_install.add_argument("--yes", action="store_true", help="skip the confirmation prompt")
-    integrations_install.add_argument("--json", action="store_true", help="output JSON")
-    integrations_uninstall = integrations_sub.add_parser("uninstall", help="remove Hound-owned harness integrations")
-    integrations_uninstall.add_argument("harnesses", nargs="*", metavar="HARNESS")
-    integrations_uninstall.add_argument("--detect", action="store_true", help="target every detected harness")
-    integrations_uninstall.add_argument("--scope", choices=("global", "project"), default="global")
-    integrations_uninstall.add_argument(
-        "--component", choices=("skill", "plugin", "mcp"), action="append", dest="components",
-        help="remove only this component; repeat to select multiple (default: all)",
-    )
-    integrations_uninstall.add_argument("--dry-run", action="store_true", help="show removals without changing files")
-    integrations_uninstall.add_argument("--yes", action="store_true", help="skip the confirmation prompt")
-    integrations_uninstall.add_argument("--json", action="store_true", help="output JSON")
+    install_cmd = sub.add_parser("install", help="install Hound skills, plugins, or MCP configuration")
+    install_cmd.add_argument("component", choices=("skill", "plugin", "mcp", "all"))
+    install_cmd.add_argument("--for", dest="harnesses", action="append", required=True, metavar="HARNESS",
+                             help="target harness; repeat to target multiple harnesses")
+    install_cmd.add_argument("--scope", choices=("global", "project"), default="global")
+    install_cmd.add_argument("--dry-run", action="store_true", help="show files without writing them")
+    install_cmd.add_argument("--yes", action="store_true", help="skip the confirmation prompt")
+    install_cmd.add_argument("--json", action="store_true", help="output JSON")
     uninstall_cmd = sub.add_parser("uninstall", help="remove Hound Tracer from this environment")
+    uninstall_cmd.add_argument("component", nargs="?", choices=("skill", "plugin", "mcp", "all"),
+                               help="remove this installed component instead of the Python package")
+    uninstall_cmd.add_argument("--for", dest="harnesses", action="append", metavar="HARNESS",
+                               help="target harness; required when removing a component")
+    uninstall_cmd.add_argument("--scope", choices=("global", "project"), default="global")
     uninstall_cmd.add_argument("--package-manager", choices=("auto", "uv", "pipx", "pip"), default="auto")
-    uninstall_cmd.add_argument("--remove-integrations", action="store_true", help="remove all detected global harness integrations first")
+    uninstall_cmd.add_argument("--remove-components", action="store_true", help="remove all Hound components from detected global harnesses first")
     uninstall_cmd.add_argument("--purge-project", action="store_true", help="remove .hound and .hound.yml/.hound.yaml from the current project")
     uninstall_cmd.add_argument("--purge-user-data", action="store_true", help="remove Hound user configuration and model cache")
     uninstall_cmd.add_argument("--dry-run", action="store_true", help="show actions without changing files")
@@ -2164,50 +2151,32 @@ def run_mcp(args: argparse.Namespace) -> int:
     return run_server()
 
 
-def run_integrations(args: argparse.Namespace) -> int:
-    from hound.integrations import detect_harnesses, install_integrations, print_results, uninstall_integrations
+def run_install(args: argparse.Namespace) -> int:
+    from hound.integrations import SUPPORTED_HARNESSES, install_integrations, print_results
 
-    detected = detect_harnesses()
-    if args.integrations_command == "detect":
-        if args.json:
-            print(json.dumps(detected, indent=2))
-        else:
-            for harness, present in detected.items():
-                print(f"{harness}: {'detected' if present else 'not detected'}")
-        return 0
-    harnesses = list(args.harnesses or [])
-    unsupported = sorted(set(harnesses) - {"opencode", "claude", "codex", "cursor", "hermes", "antigravity"})
+    harnesses = list(dict.fromkeys(args.harnesses))
+    unsupported = sorted(set(harnesses) - set(SUPPORTED_HARNESSES))
     if unsupported:
         print(f"error: unsupported harness: {', '.join(unsupported)}", file=sys.stderr)
         return 2
-    if args.detect:
-        harnesses.extend(name for name, present in detected.items() if present and name not in harnesses)
-    if not harnesses:
-        print("error: select a harness or pass --detect", file=sys.stderr)
-        return 2
+    components = {"skill", "plugin", "mcp"} if args.component == "all" else {args.component}
     if not args.dry_run and not args.yes:
         if not (sys.stdin.isatty() and sys.stdout.isatty()):
             print("error: confirmation requires a TTY; pass --yes or --dry-run", file=sys.stderr)
             return 2
-        action = "remove Hound-owned integrations from" if args.integrations_command == "uninstall" else "install skills and merge available MCP configuration for"
-        print(f"Hound will {action}: " + ", ".join(harnesses))
+        selected = "all supported components" if args.component == "all" else args.component
+        print(f"Hound will install {selected} for: {', '.join(harnesses)}")
         if input("Continue? [y/N] ").strip().lower() not in {"y", "yes"}:
             print("No changes made.")
             return 0
-    operation = uninstall_integrations if args.integrations_command == "uninstall" else install_integrations
-    results = operation(
+    results = install_integrations(
         harnesses,
         scope=args.scope,
         root=Path.cwd(),
         dry_run=args.dry_run,
-        components=set(args.components or ("skill", "plugin", "mcp")),
+        components=components,
     )
-    return print_results(
-        results,
-        as_json=args.json,
-        dry_run=args.dry_run,
-        action=args.integrations_command,
-    )
+    return print_results(results, as_json=args.json, dry_run=args.dry_run)
 
 
 def _uninstall_package_command(manager: str) -> list[str]:
@@ -2229,6 +2198,31 @@ def _uninstall_package_command(manager: str) -> list[str]:
 def run_uninstall(args: argparse.Namespace) -> int:
     from platformdirs import user_cache_path, user_config_path
 
+    if args.component is not None:
+        from hound.integrations import SUPPORTED_HARNESSES, print_results, uninstall_integrations
+
+        harnesses = list(dict.fromkeys(args.harnesses or []))
+        if not harnesses:
+            print("error: --for HARNESS is required when removing a component", file=sys.stderr)
+            return 2
+        unsupported = sorted(set(harnesses) - set(SUPPORTED_HARNESSES))
+        if unsupported:
+            print(f"error: unsupported harness: {', '.join(unsupported)}", file=sys.stderr)
+            return 2
+        if not args.dry_run and not args.yes:
+            if not (sys.stdin.isatty() and sys.stdout.isatty()):
+                print("error: confirmation requires a TTY; pass --yes or --dry-run", file=sys.stderr)
+                return 2
+            print(f"Hound will remove {args.component} from: {', '.join(harnesses)}")
+            if input("Continue? [y/N] ").strip().lower() not in {"y", "yes"}:
+                print("No changes made.")
+                return 0
+        components = {"skill", "plugin", "mcp"} if args.component == "all" else {args.component}
+        results = uninstall_integrations(
+            harnesses, scope=args.scope, root=Path.cwd(), dry_run=args.dry_run, components=components
+        )
+        return print_results(results, dry_run=args.dry_run, action="uninstall")
+
     package_command = _uninstall_package_command(args.package_manager)
     project_paths = [Path.cwd() / WORKSPACE_DIR, *(Path.cwd() / name for name in CONFIG_FILENAMES)] if args.purge_project else []
     user_paths = [
@@ -2237,7 +2231,7 @@ def run_uninstall(args: argparse.Namespace) -> int:
         Path(user_cache_path("hound")),
     ] if args.purge_user_data else []
     if args.dry_run:
-        if args.remove_integrations:
+        if args.remove_components:
             print("would remove detected global harness integrations")
         for path in project_paths + user_paths:
             if path.exists() or path.is_symlink():
@@ -2254,7 +2248,7 @@ def run_uninstall(args: argparse.Namespace) -> int:
         if input("Continue? [y/N] ").strip().lower() not in {"y", "yes"}:
             print("No changes made.")
             return 0
-    if args.remove_integrations:
+    if args.remove_components:
         from hound.integrations import SUPPORTED_HARNESSES, uninstall_integrations, print_results
 
         results = uninstall_integrations(list(SUPPORTED_HARNESSES), scope="global", root=Path.cwd())
@@ -2352,8 +2346,8 @@ def _dispatch(args: argparse.Namespace, parser: argparse.ArgumentParser) -> int:
         return run_log(args)
     if args.command == "mcp":
         return run_mcp(args)
-    if args.command == "integrations":
-        return run_integrations(args)
+    if args.command == "install":
+        return run_install(args)
     if args.command == "uninstall":
         return run_uninstall(args)
     parser.print_help()

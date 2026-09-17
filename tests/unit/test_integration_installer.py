@@ -54,18 +54,6 @@ def test_project_dry_run_does_not_write(tmp_path, monkeypatch):
     assert not (tmp_path / ".opencode").exists()
 
 
-def test_integrations_cli_requires_target(capsys):
-    assert main(["integrations", "install", "--yes"]) == 2
-    assert "select a harness" in capsys.readouterr().err
-
-
-def test_integrations_detect_json(monkeypatch, capsys):
-    monkeypatch.setattr(integrations, "detect_harnesses", lambda: {name: name == "opencode" for name in integrations.SUPPORTED_HARNESSES})
-
-    assert main(["integrations", "detect", "--json"]) == 0
-    assert json.loads(capsys.readouterr().out)["opencode"] is True
-
-
 def test_first_run_decline_is_not_repeated(tmp_path, monkeypatch, capsys):
     home = _use_home(monkeypatch, tmp_path)
     monkeypatch.setattr(integrations, "detect_harnesses", lambda: {name: name == "opencode" for name in integrations.SUPPORTED_HARNESSES})
@@ -164,17 +152,48 @@ def test_selective_uninstall_removes_only_requested_component(tmp_path, monkeypa
     assert "hound" in json.loads((home / ".claude.json").read_text(encoding="utf-8"))["mcpServers"]
 
 
-def test_integrations_cli_accepts_repeated_component_options(tmp_path, monkeypatch):
+def test_install_command_installs_one_component(tmp_path, monkeypatch):
     home = _use_home(monkeypatch, tmp_path)
     monkeypatch.chdir(tmp_path)
 
-    assert main([
-        "integrations", "install", "claude", "--scope", "global", "--yes",
-        "--component", "skill", "--component", "mcp",
-    ]) == 0
+    assert main(["install", "skill", "--for", "claude", "--scope", "global", "--yes"]) == 0
+
     assert (home / ".claude" / "skills" / "hound-tracer" / "SKILL.md").is_file()
-    assert (home / ".claude.json").is_file()
     assert not (home / ".claude" / "plugins" / "hound").exists()
+    assert not (home / ".claude.json").exists()
+
+
+def test_install_command_all_installs_every_supported_component(tmp_path, monkeypatch):
+    home = _use_home(monkeypatch, tmp_path)
+    monkeypatch.chdir(tmp_path)
+
+    assert main(["install", "all", "--for", "claude", "--yes"]) == 0
+
+    assert (home / ".claude" / "skills" / "hound-tracer" / "SKILL.md").is_file()
+    assert (home / ".claude" / "plugins" / "hound" / "plugin.json").is_file()
+    assert "hound" in json.loads((home / ".claude.json").read_text(encoding="utf-8"))["mcpServers"]
+
+
+def test_install_command_rejects_unknown_harness(capsys):
+    assert main(["install", "skill", "--for", "unknown", "--yes"]) == 2
+    assert "unsupported harness" in capsys.readouterr().err
+
+
+def test_uninstall_command_removes_one_component(tmp_path, monkeypatch):
+    home = _use_home(monkeypatch, tmp_path)
+    integrations.install_integrations(["claude"], scope="global", root=tmp_path)
+    monkeypatch.chdir(tmp_path)
+
+    assert main(["uninstall", "plugin", "--for", "claude", "--scope", "global", "--yes"]) == 0
+
+    assert not (home / ".claude" / "plugins" / "hound").exists()
+    assert (home / ".claude" / "skills" / "hound-tracer" / "SKILL.md").is_file()
+    assert "hound" in json.loads((home / ".claude.json").read_text(encoding="utf-8"))["mcpServers"]
+
+
+def test_uninstall_component_requires_harness(capsys):
+    assert main(["uninstall", "skill", "--yes"]) == 2
+    assert "--for HARNESS is required" in capsys.readouterr().err
 
 
 def test_uninstall_cli_dry_run_does_not_invoke_package_manager(tmp_path, monkeypatch, capsys):

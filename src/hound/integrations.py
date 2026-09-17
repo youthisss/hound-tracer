@@ -578,7 +578,7 @@ def first_run_offer() -> None:
         path = _manifest_path()
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(json.dumps({"skipped": True}, indent=2) + "\n", encoding="utf-8")
-        console().print("[dim]Skipped. Run `hound integrations install --detect` later.[/dim]")
+        console().print("[dim]Skipped. Run `hound install all --for <harness>` later.[/dim]")
         return
     results = install_integrations(detected, scope="global", root=Path.cwd())
     print_results(results)

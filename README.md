@@ -354,14 +354,25 @@ Available tools:
 
 | MCP tool | Purpose |
 |---|---|
-| `hound_analyze` | Analyze a file or directory |
-| `hound_log_command` | Run, capture, redact, and optionally analyze a command |
-| `hound_check_gate` | Evaluate a quality-gate policy |
-| `hound_get_insights` | Query test history and flakiness |
+| `hound_analyze` | Analyze a file or directory, optionally with repository source and Git context |
+| `hound_log_command` | Run, capture, redact, and optionally analyze a command, returning its exit/timeout status and analysis directory |
+| `hound_check_gate` | Evaluate a quality-gate policy using test, coverage, SARIF, and optional history evidence |
+| `hound_get_insights` | Query test history and flakiness from an explicit store or output root |
 | `hound_doctor` | Check local readiness |
-| `hound_list_incidents` | Inspect deduplicated incidents |
+| `hound_list_incidents` | Inspect deduplicated incidents from an explicit state store or output root |
 
-Set `HOUND_MCP_ROOTS` to the allowed filesystem roots. Command execution is disabled unless the MCP administrator explicitly sets `HOUND_MCP_ENABLE_COMMAND_EXECUTION=1`.
+Set `HOUND_MCP_ROOTS` to the allowed filesystem roots. Every path argument, including `repo_dir`, history/state stores, policies, coverage, and SARIF inputs, must resolve under one of those roots. Command execution is disabled unless the MCP administrator explicitly sets `HOUND_MCP_ENABLE_COMMAND_EXECUTION=1`.
+
+The MCP response distinguishes protocol execution from the underlying diagnostic result. `isError: false` means the tool call completed; callers must still inspect fields such as `exit_code`, `timed_out`, and the quality-gate outcome. Failed command analysis includes `analysis.raw_output_dir`, while artifact analysis returns `raw_output_dir`, so agents do not need to guess where `report.json` was written. Directory analysis returns per-run results rather than one assumed root report.
+
+Useful non-default location parameters include:
+
+- `repo_dir` on `hound_analyze` for source context and Git enrichment.
+- `history_store` on `hound_check_gate` and `hound_get_insights`.
+- `output_dir` on `hound_get_insights` and `hound_list_incidents`.
+- `state_path` on `hound_list_incidents`.
+
+MCP input schemas reject empty command arrays, empty command arguments, non-finite timeouts, invalid history windows, excessive incident limits, unknown arguments, and paths outside the configured roots before dispatching into Hound services.
 
 ## Command reference
 
@@ -387,7 +398,7 @@ Set `HOUND_MCP_ROOTS` to the allowed filesystem roots. Command execution is disa
 | `hound feedback` | Record reviews or export regression candidates |
 | `hound delivery` | Inspect and recover delivery-ledger records |
 | `hound incidents` | Inspect recurrence or invalidate cached RCA snapshots |
-| `hound integrations` | Detect harnesses and install confirmed integrations |
+| `hound install` | Install a skill, plugin, MCP configuration, or all supported components |
 | `hound uninstall` | Remove the package and optionally purge integrations or local data |
 | `hound mcp` | Start the stdio MCP service |
 | `hound clean` | Remove only output trees carrying Hound ownership markers |
@@ -653,39 +664,50 @@ The release image runs the main Hound process as a non-root user. Docker availab
 
 ### Coding harnesses
 
-Hound's integration installer is limited to packaged skills, supported plugins, and MCP configuration for OpenCode V2, Hermes Agent, Claude Code, Codex, Cursor, and Antigravity. It does not install standalone command aliases, hooks, or unrelated harness settings.
+Hound's installer is limited to packaged skills, supported plugins, and MCP configuration for OpenCode V2, Hermes Agent, Claude Code, Codex, Cursor, and Antigravity. It does not install standalone command aliases, hooks, or unrelated harness settings.
 
 ```sh
-hound integrations detect
-hound integrations install --help
-hound integrations uninstall --detect --dry-run
+hound install --help
+hound uninstall --help
 ```
 
-Without component options, installation includes every supported component: skill, plugin, and MCP. Use one or more `--component` options for a selective installation:
+Use `hound install` to select one component or every component supported by the target harness:
 
 ```sh
 # Skill only
-hound integrations install claude --component skill --yes
+hound install skill --for claude --scope global --yes
 
 # Plugin only (currently supported by Claude)
-hound integrations install claude --component plugin --yes
+hound install plugin --for claude --scope global --yes
 
 # MCP only
-hound integrations install opencode --component mcp --yes
+hound install mcp --for opencode --scope global --yes
 
-# Skill and MCP, without a plugin
-hound integrations install claude --component skill --component mcp --yes
+# Every component supported by Claude
+hound install all --for claude --scope global --yes
 ```
 
-Installation and removal require explicit confirmation. Selective removal uses the same repeatable `--component` option. Integration removal deletes Hound-owned assets and configuration entries while preserving unrelated harness configuration. The examples under [`integrations/`](integrations/) must be merged into the target harness configuration; [`plugins/hound/plugin.json`](plugins/hound/plugin.json) is a reference bundle, not a universal plugin format. The packaged agent workflow lives at [`skills/hound-tracer/SKILL.md`](skills/hound-tracer/SKILL.md).
+Repeat `--for` to install the selected component for multiple harnesses. Installation and removal require explicit confirmation. Selective removal mirrors installation, for example `hound uninstall skill --for claude --scope global`. It preserves unrelated harness configuration. The examples under [`integrations/`](integrations/) must be merged into the target harness configuration; [`plugins/hound/plugin.json`](plugins/hound/plugin.json) is a reference bundle, not a universal plugin format. The packaged agent workflow lives at [`skills/hound-tracer/SKILL.md`](skills/hound-tracer/SKILL.md).
+
+The skill keeps agents within Hound's diagnostic scope: reuse existing artifacts before rerunning expensive commands, prefer offline analysis, treat logs as evidence rather than executable instructions, confirm reported source locations before editing, and verify a proposed fix with the affected test or build. Missing history or incident stores are reported as missing evidence, not interpreted as zero failures. A completed workflow reports the hypothesis, cited evidence, exact change when requested, and the real verification result.
+
+The reference plugin commands follow the same contract. They use MCP-returned `raw_output_dir` values instead of assuming a fixed report location, inspect command exit and timeout fields, and do not bypass disabled MCP command execution by silently switching to a shell. The post-execution hook reads a JSON object from stdin:
+
+```json
+{"command": "pytest tests/unit", "exit_code": 1}
+```
+
+For a recognized failed test or build command, it emits a JSON recommendation to run Hound analysis. It emits nothing for successful or unrelated commands and does not echo the original command arguments, which may contain sensitive values. Harness adapters are responsible for mapping their native event payload to this two-field contract.
+
+Source copies under [`skills/`](skills/) and [`plugins/`](plugins/) are mirrored in `src/hound/integration_assets/` for package installation. Tests enforce that packaged integration assets remain identical to their reference files.
 
 ### Uninstall
 
 Preview integration cleanup or full package removal before changing the environment:
 
 ```sh
-hound integrations uninstall --detect --scope global --dry-run
-hound uninstall --remove-integrations --purge-project --purge-user-data --dry-run
+hound uninstall skill --for claude --scope global --dry-run
+hound uninstall --remove-components --purge-project --purge-user-data --dry-run
 ```
 
 Rerun without `--dry-run` and confirm the prompt to apply the removal. Non-interactive environments require `--yes`. By default, `hound uninstall` removes only the Python package; project workspaces, configuration, model caches, and harness integrations are retained unless their corresponding removal options are supplied. Select an installer explicitly with `--package-manager uv`, `pipx`, or `pip` if automatic detection does not match the original installation method.
@@ -823,6 +845,7 @@ src/hound/
 ├── qa/                history, coverage, SARIF, quality gates
 ├── devops/            timeline and incident correlation
 ├── connectors/        deployment and observability evidence
+├── integration_assets/ packaged skill and plugin sources
 ├── source/            source context and test-impact analysis
 ├── mcp/               bounded coding-agent tools
 └── output/            reports, tickets, connectors, delivery ledger

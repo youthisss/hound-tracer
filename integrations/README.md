@@ -22,6 +22,19 @@ The files in this directory are configuration examples, not interchangeable plug
 
 All examples restrict Hound to the current workspace with `HOUND_MCP_ROOTS=.`. They do not enable `hound_log_command`. Add `HOUND_MCP_ENABLE_COMMAND_EXECUTION=1` only when the harness permission policy asks before running MCP tools.
 
+## MCP and hook contracts
+
+The six MCP tools map to existing Hound services. Analysis accepts `repo_dir` for
+source/git context; quality gates accept `history_store`; insights and incidents
+accept `output_dir` for locating stores from non-default runs. Command capture
+returns the analysis directory on failure. Check `exit_code` and `timed_out`
+before interpreting a successful MCP response as a successful command.
+
+The reference plugin hook accepts a JSON object on stdin with `command` (string)
+and `exit_code` (integer). It emits a JSON recommendation only for failed
+test/build commands, without echoing command arguments. Harness adapters must
+map their native event payload to this contract.
+
 ## Updating
 
 - Git checkout: update the repository normally. Harnesses that reference `./skills` see the new skill immediately or after reload.
@@ -34,9 +47,8 @@ All examples restrict Hound to the current workspace with `HOUND_MCP_ROOTS=.`. T
 After installing the Python package, detect and configure supported harnesses:
 
 ```console
-hound integrations detect
-hound integrations install --detect --dry-run
-hound integrations install --detect
+hound install all --for opencode --dry-run
+hound install all --for opencode
 ```
 
 Use `--scope project` to write project-local skills and configuration. The default
