@@ -1,7 +1,20 @@
-name: 9Router Canary
+name: Provider Canary
 
 on:
   workflow_dispatch:
+    inputs:
+      provider:
+        description: Provider ID; defaults to the HOUND_CANARY_PROVIDER variable
+        required: false
+        type: string
+      model:
+        description: Model ID; defaults to the HOUND_CANARY_MODEL variable
+        required: false
+        type: string
+      base_url:
+        description: Optional API base URL; defaults to the HOUND_CANARY_BASE_URL variable
+        required: false
+        type: string
   schedule:
     - cron: "17 3 * * *"
 
@@ -13,33 +26,39 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     env:
-      NINE_ROUTER_API_KEY: ${{ secrets.NINE_ROUTER_API_KEY }}
-      NINE_ROUTER_BASE_URL: ${{ secrets.NINE_ROUTER_BASE_URL }}
-      NINE_ROUTER_MODEL: ag/gemini-3.7-flash-low
+      HOUND_API_PROVIDER: ${{ inputs.provider || vars.HOUND_CANARY_PROVIDER }}
+      HOUND_MODEL: ${{ inputs.model || vars.HOUND_CANARY_MODEL }}
+      HOUND_BASE_URL: ${{ inputs.base_url || vars.HOUND_CANARY_BASE_URL }}
+      HOUND_API_KEY: ${{ secrets.HOUND_CANARY_API_KEY }}
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
       - uses: astral-sh/setup-uv@2af22b5b2dcfc0729ee842c635f300f1fc5a9e9a # v5.0.0
       - run: uv sync --frozen
-      - name: Verify credential configuration
+      - name: Verify canary configuration
         shell: bash
-        run: test -n "$NINE_ROUTER_API_KEY" && test -n "$NINE_ROUTER_BASE_URL"
+        run: |
+          test -n "$HOUND_API_PROVIDER"
+          test -n "$HOUND_MODEL"
+          test -n "$HOUND_API_KEY"
       - name: Run strict live analysis
         shell: bash
         run: |
           mkdir canary-input
           cp tests/fixtures/pytest_fail.log canary-input/
           uv run hound analyze canary-input --output-dir canary-output \
-            --provider 9router --no-dedup --require-llm
+            --no-dedup --require-llm
       - name: Verify live contract
         shell: bash
         run: |
           python - <<'PY'
           import json
+          import os
           from pathlib import Path
 
           report = json.loads(next(Path("canary-output").glob("**/report.json")).read_text())
+          provider = os.environ["HOUND_API_PROVIDER"]
           assert report["meta"]["engine"] == "merged", report["meta"]
           assert report["meta"]["llm"]["status"] == "succeeded", report["meta"]
-          assert report["meta"]["model"].startswith("9router:"), report["meta"]
+          assert report["meta"]["model"].startswith(f"{provider}:"), report["meta"]
           assert report["meta"]["usage"].get("total_tokens", 0) > 0, report["meta"]
           PY

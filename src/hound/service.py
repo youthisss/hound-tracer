@@ -93,6 +93,8 @@ def prepare_project_run(command: list[str], cwd: str | Path, *, timeout: float =
     if timeout <= 0 or timeout > 3600:
         raise ValueError("timeout must be between 1 and 3600 seconds")
     state_root = directory if directory.name == ".hound" else directory / ".hound"
+    if path_has_symlink(state_root) or state_root.is_symlink():
+        raise ValueError("project run state directory must not contain symlinks")
     return ProjectRunRequest(
         command=tuple(command), cwd=directory, capture_directory=state_root / "captures",
         runs_directory=state_root / "runs", timeout=timeout,
