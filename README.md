@@ -63,9 +63,10 @@ Use Hound when you need a repeatable investigation artifact rather than another 
 ## How it works
 
 ```text
-Failure evidence
-  .log | JUnit .xml | SARIF .sarif | supported test-report .json
-                               │
+┌──────────────────────────────────────────────────────────────┐
+│ Failure evidence                                             │
+│ .log · JUnit .xml · SARIF .sarif · supported test-report.json│
+└──────────────────────────────┬───────────────────────────────┘
                                ▼
 ┌──────────────────────────────────────────────────────────────┐
 │ Ingest                                                       │
