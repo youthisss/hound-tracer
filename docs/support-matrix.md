@@ -6,10 +6,10 @@ separate release gates.
 
 | Surface | Python / runtime | Operating system | Required external runtime | Status |
 |---|---|---|---|---|
-| CLI and library | CPython `>=3.10,<3.13` | Windows, Linux | None for `--offline` | Supported by targeted local tests; compatibility matrix is defined in CI |
-| CLI and library | CPython `>=3.10,<3.13` | macOS | None for `--offline` | Expected portable; macOS runner evidence pending |
-| TUI | CPython `>=3.10,<3.13` | Windows, Linux | Terminal with text input and color support | Supported; headless Textual tests cover critical paths |
-| HTTP server | CPython `>=3.10,<3.13` | Windows, Linux | Reverse proxy for TLS when remote | Supported on loopback; multi-instance limiting is not provided |
+| CLI and library | CPython `>=3.10,<3.14` | Windows, Linux | None for `--offline` | Supported by targeted local tests; compatibility matrix is defined in CI |
+| CLI and library | CPython `>=3.10,<3.14` | macOS | None for `--offline` | Expected portable; macOS runner evidence pending |
+| TUI | CPython `>=3.10,<3.14` | Windows, Linux | Terminal with text input and color support | Supported; headless Textual tests cover critical paths |
+| HTTP server | CPython `>=3.10,<3.14` | Windows, Linux | Reverse proxy for TLS when remote | Supported on loopback; multi-instance limiting is not provided |
 | Docker runtime | Python 3.11 image | Linux container host | Docker or compatible OCI runtime | CI/release gate; Docker is unavailable in the current workspace |
 | GitHub Action | Docker-capable Linux runner | GitHub-hosted or self-hosted Linux | `GITHUB_WORKSPACE`, `GITHUB_OUTPUT` | Contract documented; image execution is CI/release gated |
 | LLM providers | Any supported Python runtime | Windows, Linux, macOS | Explicit endpoint and credentials | Optional; provider availability and model behavior are not local release evidence |
