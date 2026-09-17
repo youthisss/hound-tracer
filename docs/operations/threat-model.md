@@ -30,6 +30,7 @@ default and requires no outbound network access.
 | CI/release authority abuse | Actions are SHA-pinned, default permissions are read-only, publication uses isolated OIDC jobs and environments, and tag/version equality is enforced. | `.github/workflows/ci.yml`, `.github/workflows/release.yml` | Environment reviewers and tag rulesets are GitHub settings. |
 | Container escape or credential inclusion | Main runtime is non-root, build context excludes local secrets/state, base images are digest-pinned, and images are scanned before release. | `Dockerfile`, `Dockerfile.action`, `.dockerignore` | The Action starts as root only to normalize mounted workspace ownership, then executes Hound as UID 10001. |
 | Project command execution | Explicit operator action; no shell; immutable cwd and command request; mandatory timeout; process-tree cancellation; aggregate output cap; redacted argv and output; atomic non-symlink run records. | `tests/integration/test_log_collector.py`, `tests/e2e/test_tui.py` | Execution is not sandboxed. Project hooks and child processes can access ambient files, credentials, and network with the caller's permissions. Run only trusted checkouts or isolate Hound externally. |
+| Scheduled provider canary | Manual or scheduled protected workflow | Sanitized fixture and generic protected provider credential | Separate workflow, no production logs; repository variables select the provider endpoint and model. |
 
 ## Outbound Network Inventory
 
