@@ -14,7 +14,7 @@ from urllib.parse import urlsplit
 from uuid import uuid4
 from pathlib import Path
 
-from hound import __version__
+from hound import BRAND_NAME, __version__
 from hound import service
 from hound.analyze.cost import TransportBudget as _BatchBudget, RequestAccount, format_cost
 from hound.collector import CollectionInputError, collect_command, collect_stdin
@@ -28,6 +28,12 @@ from hound.triage.dedup import configure_store
 from hound.trust import SOURCE_CLASSES
 
 DEFAULT_OUT = "hound-output"
+WORKSPACE_DIR = Path(".hound")
+WORKSPACE_ARTIFACTS = WORKSPACE_DIR / "artifacts"
+WORKSPACE_CAPTURES = WORKSPACE_DIR / "captures"
+WORKSPACE_RUNS = WORKSPACE_DIR / "runs"
+WORKSPACE_RESULTS = WORKSPACE_DIR / "results"
+WORKSPACE_STATE = WORKSPACE_DIR / "state"
 CONFIG_FILENAMES = (".hound.yml", ".hound.yaml")
 _LEGACY_OPTION_ALIASES = {
     "--out": "--output-dir",
@@ -169,20 +175,27 @@ def build_parser() -> argparse.ArgumentParser:
         prog="hound",
         description="Auto-investigate CI/CD failures: root cause -> triage -> ticket draft.",
     )
-    parser.add_argument("--version", action="version", version=f"Hound {__version__}")
+    parser.add_argument("--version", action="version", version=f"{BRAND_NAME} {__version__}")
     # Keep normalization at the top level; positional values in nested parsers
     # must not be mistaken for legacy command names.
     sub = parser.add_subparsers(dest="command", parser_class=argparse.ArgumentParser)
     analyze_cmd = sub.add_parser("analyze", help="investigate artifacts and emit complete results")
-    analyze_cmd.add_argument("log_directory", nargs="?", help="supported artifact file or directory")
+    analyze_cmd.add_argument(
+        "log_directory",
+        nargs="?",
+        help="supported artifact file or directory (default: initialized .hound workspace)",
+    )
     analyze_cmd.add_argument("--log", dest="legacy_log", default=None, help=argparse.SUPPRESS)
     analyze_cmd.add_argument("--format", choices=("text", "json", "markdown"), default="text")
     analyze_cmd.add_argument("--output", default=None, help="write formatted result to this file")
     _add_analyze_options(analyze_cmd)
     batch = sub.add_parser("batch", help="process many artifacts with budgets and usage telemetry")
     _add_common(batch, batch=True)
+    cli_cmd = sub.add_parser("cli", help="open the persistent Rich command line")
+    cli_cmd.set_defaults(return_to_launcher=False)
     tui = sub.add_parser("console", help="interactive terminal UI")
-    tui.add_argument("--logs", default=None, help="log directory to browse (default: cwd)")
+    tui.set_defaults(return_to_launcher=False)
+    tui.add_argument("--logs", default=None, help="project or artifact directory to scan recursively (default: cwd)")
     tui.add_argument("--repo-dir", dest="repo", default=None, help="path to the local git checkout")
     tui.add_argument("--output-dir", dest="out", default=DEFAULT_OUT, help="output directory (default: hound-output)")
     tui_mode = tui.add_mutually_exclusive_group()
@@ -230,6 +243,11 @@ def build_parser() -> argparse.ArgumentParser:
     _add_llm_args(server_cmd)
     providers_cmd = sub.add_parser("providers", help="list built-in LLM provider presets")
     providers_cmd.add_argument("--json", action="store_true", help="output as JSON")
+    auth_cmd = sub.add_parser("auth", help="manage provider subscription sessions")
+    auth_sub = auth_cmd.add_subparsers(dest="auth_command", required=True)
+    auth_login = auth_sub.add_parser("login", help="sign in through an official provider CLI")
+    auth_login.add_argument("provider", choices=("openai-oauth", "claude-oauth", "gemini-oauth"))
+    auth_login.add_argument("--accept-risk", action="store_true", help="accept the subscription session risk notice")
     models_cmd = sub.add_parser("models", help="list or refresh a provider model catalog")
     models_cmd.add_argument("--provider", required=True, help="provider ID to inspect")
     models_cmd.add_argument("--base-url", default=None, help="provider base URL override")
@@ -247,7 +265,7 @@ def build_parser() -> argparse.ArgumentParser:
     clean_cmd = sub.add_parser("clean", help="remove stored analysis output")
     clean_cmd.add_argument("--output-dir", dest="out", default=DEFAULT_OUT, help="analysis output directory")
     clean_cmd.add_argument("--yes", action="store_true", help="confirm deletion")
-    init_cmd = sub.add_parser("init", help="create a commented project config template")
+    init_cmd = sub.add_parser("init", help="initialize project configuration and local Hound workspace")
     init_cmd.add_argument("--config", default=".hound.yml", help="config path to create")
     config_cmd = sub.add_parser("config", help="update non-secret project configuration")
     config_sub = config_cmd.add_subparsers(dest="config_command", required=True)
@@ -472,7 +490,12 @@ def build_parser() -> argparse.ArgumentParser:
     log_cmd.add_argument("--output", default=None, help="destination .log file or existing directory")
     log_cmd.add_argument("--raw-console", action="store_true", help="print unredacted output (unsafe)")
     log_cmd.add_argument("--analyze", action="store_true", help="analyze captured log after collection")
-    log_cmd.add_argument("--output-dir", dest="out", default=DEFAULT_OUT, help="analysis output directory")
+    log_cmd.add_argument(
+        "--output-dir",
+        dest="out",
+        default=None,
+        help="analysis output directory (default: .hound/results in an initialized project)",
+    )
     log_cmd.add_argument("--offline", action="store_true", help="use local analysis when --analyze is set")
     log_cmd.add_argument("--config", default=None, help="optional YAML config used with --analyze")
     log_cmd.add_argument("--no-dedup", action="store_true", help="disable dedup state persistence with --analyze")
@@ -520,7 +543,12 @@ def _add_client_connection_args(parser: argparse.ArgumentParser) -> None:
 
 def _add_analyze_options(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--repo-dir", dest="repo", default=None, help="path to local git checkout")
-    parser.add_argument("--output-dir", dest="out", default=DEFAULT_OUT, help="artifact directory (default: hound-output)")
+    parser.add_argument(
+        "--output-dir",
+        dest="out",
+        default=None,
+        help="result directory (default: .hound/results for workspace analysis, otherwise hound-output)",
+    )
     parser.add_argument("--offline", action="store_true", help="local rule-based analysis; no network")
     parser.add_argument("--offline-value", choices=("true", "false"), default=None, help=argparse.SUPPRESS)
     parser.add_argument("--jobs", type=_positive_int, default=1,
@@ -552,8 +580,16 @@ def _discover_config(config_path: str | None, repo_dir: str | None) -> str | Non
 def run_analyze(args: argparse.Namespace) -> int:
     input_path = getattr(args, "log_directory", None) or getattr(args, "legacy_log", None)
     if not input_path:
-        print("error: analyze requires <log-directory>", file=sys.stderr)
-        return 2
+        if WORKSPACE_DIR.is_dir():
+            input_path = str(WORKSPACE_DIR)
+        else:
+            print(
+                "error: analyze requires <artifact-path>; run 'hound init' to create a default artifact workspace",
+                file=sys.stderr,
+            )
+            return 2
+    if getattr(args, "out", None) is None:
+        args.out = str(WORKSPACE_RESULTS if Path(input_path) == WORKSPACE_DIR else DEFAULT_OUT)
     path = Path(input_path).expanduser()
     legacy_file = path.is_file()
     if getattr(args, "source_context_value", None) is not None:
@@ -1175,6 +1211,12 @@ def run_list_runs(args: argparse.Namespace) -> int:
             print(f"warning: skipping malformed report: {report}", file=sys.stderr)
     if args.json:
         print(json.dumps(rows, indent=2))
+    elif sys.stdout.isatty():
+        from hound.presentation import show_table
+
+        show_table("RECENT RUNS", ["Run ID", "Stage", "Kind", "Severity", "Report"], (
+            (row["run_id"], row["stage"], row["kind"], row["severity"].upper(), row["report"]) for row in rows
+        ))
     else:
         for row in rows:
             print(f"{row['run_id']}  {row['stage']}/{row['kind']}  {row['severity']}  {row['report']}")
@@ -1250,23 +1292,91 @@ def _is_owned_output_tree(root: Path, marker_name: str, marker_content: str) -> 
 
 
 def run_init(args: argparse.Namespace) -> int:
-    path = Path(args.config)
+    path = Path(args.config).expanduser()
+    project_root = path.parent
+    workspace = project_root / WORKSPACE_DIR
+    directories = (
+        workspace / "artifacts",
+        workspace / "captures",
+        workspace / "runs",
+        workspace / "results",
+        workspace / "state",
+    )
+    created_config = False
     try:
+        if path_has_symlink(project_root) or workspace.is_symlink():
+            raise ValueError("workspace path must not contain symlinked components")
         path.parent.mkdir(parents=True, exist_ok=True)
-        with path.open("x", encoding="utf-8") as stream:
-            stream.write(
-                "# Hound Tracer CI/CD analysis configuration\n"
-                "llm:\n  provider: openai\n  model: auto  # resolve from the discovered catalog\n"
-                "trust:\n  source_class: local_artifact\n"
-                "redact: true\ncomponents: {}\n"
+        if not path.exists():
+            with path.open("x", encoding="utf-8") as stream:
+                stream.write(
+                    "# Hound Tracer CI/CD analysis configuration\n"
+                    "llm:\n  provider: openai\n  model: auto  # resolve from the discovered catalog\n"
+                    "trust:\n  source_class: local_artifact\n"
+                    "redact: true\ncomponents: {}\n"
+                    "dedup:\n  backend: sqlite\n  state_file: .hound/state/incidents.sqlite3\n"
+                )
+            created_config = True
+        elif not path.is_file():
+            raise ValueError(f"config path is not a file: {path}")
+        for directory in directories:
+            if directory.is_symlink():
+                raise ValueError(f"workspace directory must not be a symlink: {directory}")
+            directory.mkdir(parents=True, exist_ok=True)
+        from hound.output.report import ensure_outdir
+
+        ensure_outdir(workspace / "results")
+        readme = workspace / "README.md"
+        if not readme.exists():
+            readme.write_text(
+                "# Hound workspace\n\n"
+                "- `artifacts/`: place supported `.log`, JUnit `.xml`, `.sarif`, and test-report `.json` files here.\n"
+                "- `captures/`: redacted output captured by `hound log`.\n"
+                "- `runs/`: project-run records created by the Hound TUI.\n"
+                "- `results/`: generated RCA reports and ticket drafts.\n"
+                "- `state/`: reserved for local Hound state.\n\n"
+                "Run `hound analyze --offline` to analyze artifacts and captures recursively.\n",
+                encoding="utf-8",
             )
-    except FileExistsError:
-        print(f"error: config already exists: {path}", file=sys.stderr)
+        ignore = workspace / ".gitignore"
+        if not ignore.exists():
+            ignore.write_text(
+                "artifacts/*\n!artifacts/.gitkeep\n"
+                "captures/*\n!captures/.gitkeep\n"
+                "runs/*\n!runs/.gitkeep\n"
+                "results/*\n!results/.gitkeep\n"
+                "state/*\n!state/.gitkeep\n",
+                encoding="utf-8",
+            )
+        for directory in directories:
+            keep = directory / ".gitkeep"
+            if not keep.exists():
+                keep.write_text("", encoding="ascii")
+    except ValueError as exc:
+        print(f"error: could not initialize workspace: {exc}", file=sys.stderr)
         return 2
     except OSError as exc:
-        print(f"error: could not create config: {exc}", file=sys.stderr)
+        print(f"error: could not initialize workspace: {exc}", file=sys.stderr)
         return 3
-    print(f"created config template: {path}")
+    if sys.stdout.isatty():
+        from hound.presentation import show_panel
+
+        show_panel("HOUND WORKSPACE", (
+            ("Configuration", f"{'CREATED' if created_config else 'UNCHANGED'}  {path}"),
+            ("Workspace", workspace),
+            ("Artifact inbox", workspace / "artifacts"),
+            ("Command captures", workspace / "captures"),
+            ("Analysis results", workspace / "results"),
+            ("Next", "hound log --analyze --offline -- <command>"),
+        ), subtitle="Ready")
+    else:
+        print(f"{'created' if created_config else 'kept'} config template: {path}")
+        print(f"initialized Hound workspace: {workspace}")
+        print(f"artifact inbox : {workspace / 'artifacts'}")
+        print(f"command captures: {workspace / 'captures'}")
+        print(f"analysis results: {workspace / 'results'}")
+        print("next: hound log --analyze --offline -- <command>")
+        print("      hound analyze --offline")
     return 0
 
 
@@ -1274,11 +1384,16 @@ def run_log(args: argparse.Namespace) -> int:
     command = list(args.command_args)
     if command and command[0] == "--":
         command = command[1:]
+    capture_output = args.output
+    if capture_output is None and WORKSPACE_DIR.is_dir():
+        capture_output = str(WORKSPACE_CAPTURES)
+    if getattr(args, "out", None) is None:
+        args.out = str(WORKSPACE_RESULTS if WORKSPACE_DIR.is_dir() else DEFAULT_OUT)
     try:
         if command:
-            collected = collect_command(command, output=args.output, name=args.name, raw_console=args.raw_console)
+            collected = collect_command(command, output=capture_output, name=args.name, raw_console=args.raw_console)
         elif not sys.stdin.isatty():
-            collected = collect_stdin(sys.stdin, output=args.output, name=args.name, raw_console=args.raw_console)
+            collected = collect_stdin(sys.stdin, output=capture_output, name=args.name, raw_console=args.raw_console)
         else:
             raise CollectionInputError(
                 "no log source; run 'hound log -- <command>' or pipe output into 'hound log'"
@@ -1659,10 +1774,10 @@ def run_batch(args: argparse.Namespace) -> int:
 
 
 def run_tui(args: argparse.Namespace) -> int:
-    from hound.tui import RcaTui
+    from hound.tui import HoundTui
 
     cfg_path = _discover_config(getattr(args, "config", None), args.repo)
-    app = RcaTui(
+    app = HoundTui(
         logs_dir=args.logs,
         repo_dir=args.repo,
         out_dir=args.out,
@@ -1682,13 +1797,28 @@ def run_tui(args: argparse.Namespace) -> int:
         max_cost_usd=getattr(args, "max_cost_usd", None),
         redact=False if getattr(args, "no_redact", False) else None,
         no_dedup=True if getattr(args, "no_dedup", False) else None,
+        return_to_launcher=getattr(args, "return_to_launcher", False),
     )
-    app.run()
-    return 0
+    result = app.run()
+    return 130 if result == "shell" else 0
 
 
 def run_server(args: argparse.Namespace) -> int:
     from hound.server import run_server as _run_server
+
+    if sys.stdout.isatty() and args.log_format != "json":
+        from hound.presentation import show_panel
+
+        token = args.token or os.environ.get("HOUND_SERVER_TOKEN") or os.environ.get("TH_SERVER_TOKEN")
+        show_panel("HOUND HTTP API", (
+            ("Status", "STARTING"),
+            ("Address", f"http://{args.host}:{args.port}"),
+            ("Health", f"http://{args.host}:{args.port}/health"),
+            ("Log root", Path(args.log_root).expanduser().resolve()),
+            ("Output", Path(args.out).expanduser().resolve()),
+            ("Authentication", "Configured" if token else "Not configured (local bind recommended)"),
+            ("Stop", "Ctrl+C"),
+        ))
 
     try:
         _run_server(
@@ -1737,6 +1867,12 @@ def run_list_providers(args: argparse.Namespace) -> int:
         })
     if args.json:
         print(_json.dumps(rows, indent=2))
+    elif sys.stdout.isatty():
+        from hound.presentation import show_table
+
+        show_table("LLM PROVIDERS", ["Provider", "Base URL", "Credential env", "Model env"], (
+            (r["name"], r["base_url"] or "Required", r["env_api_key"] or "None", r["env_model"] or "None") for r in rows
+        ))
     else:
         for r in rows:
             envs = " ".join(v for v in (r["env_api_key"], r["env_model"]) if v)
@@ -1744,6 +1880,21 @@ def run_list_providers(args: argparse.Namespace) -> int:
             if envs:
                 print(f"{'':<12} env: {envs}")
     return 0
+
+
+def run_auth(args: argparse.Namespace) -> int:
+    from hound.subscription_auth import NOTICE, accept_risk, login
+
+    print(NOTICE, file=sys.stderr)
+    if not args.accept_risk:
+        print("error: pass --accept-risk to confirm that you understand this notice", file=sys.stderr)
+        return 2
+    try:
+        accept_risk(args.provider)
+        return login(args.provider)
+    except (OSError, RuntimeError, ValueError) as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 2
 
 
 def _safe_config(config) -> dict:
@@ -1790,6 +1941,15 @@ def run_config_show(args: argparse.Namespace) -> int:
     payload = _safe_config(config)
     if args.json:
         print(json.dumps(payload, indent=2))
+    elif sys.stdout.isatty():
+        from hound.presentation import show_panel
+
+        rows = [(key.replace("_", " ").title(), payload[key]) for key in (
+            "provider", "model", "base_url", "offline", "llm_enabled", "api_key", "redact", "state_backend"
+        )]
+        rows.append(("Trust source", payload["trust"]["source_class"]))
+        rows.extend((f"Integration {name}", "READY" if ready else "NOT CONFIGURED") for name, ready in payload["integrations"].items())
+        show_panel("CONFIGURATION", rows)
     else:
         for key in ("provider", "model", "base_url", "offline", "llm_enabled", "api_key", "redact", "state_backend"):
             print(f"{key:<18} {payload[key]}")
@@ -1898,6 +2058,18 @@ def run_doctor(args: argparse.Namespace) -> int:
     }
     if args.json:
         print(json.dumps(payload, indent=2))
+    elif sys.stdout.isatty():
+        from hound.presentation import show_table
+
+        optional = {"docker", "kubectl"}
+        show_table("HOUND DOCTOR", ["Status", "Check", "Detail"], (
+            (
+                "PASS" if check["ok"] else ("WARN" if check["name"] in optional else "FAIL"),
+                check["name"],
+                check["detail"],
+            )
+            for check in checks
+        ))
     else:
         for check in checks:
             marker = "ok" if check["ok"] else "missing"
@@ -2015,28 +2187,15 @@ def main(argv: list[str] | None = None) -> int:
             from hound.integrations import first_run_offer
 
             first_run_offer()
-        return run_tui(argparse.Namespace(
-            logs=None,
-            repo=None,
-            out=DEFAULT_OUT,
-            offline=None,
-            config=None,
-            no_redact=False,
-            provider=None,
-            model=None,
-            base_url=None,
-            api_key=None,
-            max_retries=None,
-            source_context=None,
-            context=None,
-            enrich=None,
-            jobs=None,
-            max_llm_calls=None,
-            max_cost_usd=None,
-            no_dedup=False,
-        ))
+        from hound.launcher import launch
+
+        return launch(build_parser(), dispatch=_dispatch, run_tui=run_tui, run_server=run_server)
     parser = build_parser()
     args = parser.parse_args(effective_argv)
+    return _dispatch(args, parser)
+
+
+def _dispatch(args: argparse.Namespace, parser: argparse.ArgumentParser) -> int:
     if getattr(args, "no_redact", False):
         print(
             "warning: unredacted mode can expose secrets and PII in reports, logs, and provider payloads",
@@ -2046,12 +2205,18 @@ def main(argv: list[str] | None = None) -> int:
         return run_analyze(args)
     if args.command == "batch":
         return run_batch(args)
+    if args.command == "cli":
+        from hound.rich_cli import run_cli
+
+        return run_cli(args, parser, _dispatch)
     if args.command in {"tui", "console"}:
         return run_tui(args)
     if args.command in {"server", "serve"}:
         return run_server(args)
     if args.command in {"list-providers", "providers"}:
         return run_list_providers(args)
+    if args.command == "auth":
+        return run_auth(args)
     if args.command == "models":
         return run_models(args)
     if args.command == "report":

@@ -378,7 +378,7 @@ class MCPServer:
                         "tools": {},
                     },
                     "serverInfo": {
-                        "name": "hound-mcp",
+                        "name": "hound-tracer",
                         "version": __version__,
                     },
                 },

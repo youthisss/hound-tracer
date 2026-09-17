@@ -1,7 +1,7 @@
 {
   "$schema": "https://json.schemastore.org/partial-plugin-manifest.json",
   "name": "hound-tracer",
-  "version": "0.5.2",
+  "version": "0.6.0",
   "displayName": "Hound Tracer CI/CD & Build Diagnostics",
   "description": "Offline-first diagnostic, Root Cause Analysis (RCA), and quality gate plugin for troubleshooting CI/CD, build, test, and container crashes.",
   "author": {

@@ -79,12 +79,16 @@ def load_custom_providers(path: Path = REGISTRY_PATH) -> dict[str, dict]:
         supports_discovery = value.get("supports_model_discovery", True)
         if not isinstance(supports_discovery, bool):
             raise ValueError(f"provider registry entry {provider_id!r}.supports_model_discovery must be boolean")
+        protocol = str(value.get("protocol") or "openai")
+        if protocol not in {"openai", "anthropic"}:
+            raise ValueError(f"provider registry entry {provider_id!r}.protocol must be openai or anthropic")
         result[provider_id] = {
             "name": str(value.get("name") or provider_id),
             "base_url": base_url,
             "default_model": default_model,
             "models": sorted(set(models), key=str.lower),
-            "supports_model_discovery": supports_discovery,
+            "supports_model_discovery": False if protocol == "anthropic" else supports_discovery,
+            "protocol": protocol,
         }
     return result
 
@@ -102,13 +106,17 @@ def save_custom_provider(provider_id: str, definition: dict, path: Path = REGIST
     supports_discovery = definition.get("supports_model_discovery", True)
     if not isinstance(supports_discovery, bool):
         raise ValueError("supports_model_discovery must be boolean")
+    protocol = str(definition.get("protocol") or "openai")
+    if protocol not in {"openai", "anthropic"}:
+        raise ValueError("protocol must be openai or anthropic")
     providers = load_custom_providers(path)
     providers[provider_id] = {
         "name": str(definition.get("name") or provider_id),
         "base_url": base_url,
         "default_model": str(definition.get("default_model") or ""),
         "models": sorted(set(models), key=str.lower),
-        "supports_model_discovery": supports_discovery,
+        "supports_model_discovery": False if protocol == "anthropic" else supports_discovery,
+        "protocol": protocol,
     }
     path.parent.mkdir(parents=True, exist_ok=True)
     atomic_write(path, yaml.safe_dump({"version": 1, "providers": providers}, sort_keys=False))
@@ -190,6 +198,35 @@ def discover_models(
     if not models:
         raise ValueError("provider returned no models")
     return models[:5000]
+
+
+def check_anthropic_compatible(base_url: str, api_key: str, model: str, timeout: float = 10.0) -> None:
+    if not api_key:
+        raise ValueError("API key is required")
+    if not model.strip():
+        raise ValueError("model ID is required")
+    base_url = validate_base_url(base_url)
+    endpoint = f"{base_url}/messages" if base_url.endswith("/v1") else f"{base_url}/v1/messages"
+    payload = json.dumps({
+        "model": model.strip(),
+        "max_tokens": 1,
+        "messages": [{"role": "user", "content": "Reply with OK"}],
+    }).encode("utf-8")
+    request = Request(endpoint, data=payload, method="POST", headers={
+        "content-type": "application/json",
+        "x-api-key": api_key,
+        "anthropic-version": "2023-06-01",
+    })
+    try:
+        with urlopen(request, timeout=timeout) as response:
+            if not 200 <= int(response.status) < 300:
+                raise ValueError(f"provider returned HTTP {response.status}")
+    except HTTPError as exc:
+        if exc.code in {401, 403}:
+            raise ValueError("authentication failed") from exc
+        raise ValueError(f"provider returned HTTP {exc.code}") from exc
+    except (OSError, URLError) as exc:
+        raise ValueError(f"provider unavailable: {exc}") from exc
 
 
 def cache_models(provider_id: str, base_url: str, models: list[str], path: Path = CACHE_PATH) -> None:

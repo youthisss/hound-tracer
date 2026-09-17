@@ -1,6 +1,8 @@
 # Threat Model
 
-Hound is an observational, read-only failure-analysis tool. Logs,
+Hound is an advisory failure-analysis tool. Its analysis and infrastructure
+connectors are observational and read-only, while explicit local command runners execute
+operator-selected, checkout-controlled code with the Hound process permissions. Logs,
 repositories, structured artifacts, provider responses, delivery responses, and
 fork pull requests are separate trust boundaries. Offline analysis is the safest
 default and requires no outbound network access.
@@ -27,6 +29,7 @@ default and requires no outbound network access.
 | Persistent-state exposure or corruption | SQLite uses WAL and bounded retention; raw logs are excluded; corrupt legacy state is preserved for recovery. Backups remain operator-controlled sensitive data. | `tests/integration/test_dedup.py`, `tests/integration/test_qa_history.py` | Host filesystem permissions and backup encryption are external controls. |
 | CI/release authority abuse | Actions are SHA-pinned, default permissions are read-only, publication uses isolated OIDC jobs and environments, and tag/version equality is enforced. | `.github/workflows/ci.yml`, `.github/workflows/release.yml` | Environment reviewers and tag rulesets are GitHub settings. |
 | Container escape or credential inclusion | Main runtime is non-root, build context excludes local secrets/state, base images are digest-pinned, and images are scanned before release. | `Dockerfile`, `Dockerfile.action`, `.dockerignore` | The Action starts as root only to normalize mounted workspace ownership, then executes Hound as UID 10001. |
+| Project command execution | Explicit operator action; no shell; immutable cwd and command request; mandatory timeout; process-tree cancellation; aggregate output cap; redacted argv and output; atomic non-symlink run records. | `tests/integration/test_log_collector.py`, `tests/e2e/test_tui.py` | Execution is not sandboxed. Project hooks and child processes can access ambient files, credentials, and network with the caller's permissions. Run only trusted checkouts or isolate Hound externally. |
 
 ## Outbound Network Inventory
 

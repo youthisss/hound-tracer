@@ -5,6 +5,8 @@ import json
 import re
 import threading
 import time
+from urllib.error import HTTPError, URLError
+from urllib.request import Request, urlopen
 
 from hound.config import Config, resolve_model_name
 from hound.models import Artifacts
@@ -97,6 +99,10 @@ def build_request_preview(artifacts: Artifacts, config: Config) -> dict:
 
 def analyze_with_llm(artifacts: Artifacts, config: Config) -> tuple[dict, dict]:
     """Call the LLM and return ``(data_dict, usage_dict)``. Raises LlmError on failure."""
+    if config.provider in {"openai-oauth", "claude-oauth", "gemini-oauth"}:
+        return _analyze_with_subscription(artifacts, config)
+    if _provider_protocol(config.provider) == "anthropic":
+        return _analyze_with_anthropic_compatible(artifacts, config)
     client = _make_client(config)
     usage: dict = {}
     account = config.request_account
@@ -167,6 +173,66 @@ def analyze_with_llm(artifacts: Artifacts, config: Config) -> tuple[dict, dict]:
     except json.JSONDecodeError as exc:
         raise LlmError(f"LLM returned invalid JSON: {exc}", usage=usage) from exc
     return data, usage
+
+
+def _analyze_with_subscription(artifacts: Artifacts, config: Config) -> tuple[dict, dict]:
+    from hound.subscription_auth import invoke
+
+    prompt = prompts.SYSTEM_PROMPT + "\n\n" + prompts.build_user_prompt(artifacts)
+    schema = {"type": "object", "additionalProperties": True}
+    try:
+        content = invoke(config.provider, config.model, prompt, schema, config.timeout)
+        return _parse_json_object(content), {}
+    except Exception as exc:
+        if isinstance(exc, LlmError):
+            raise
+        raise LlmError(str(exc)) from exc
+
+
+def _provider_protocol(provider: str) -> str:
+    from hound.providers import load_custom_providers
+
+    return str(load_custom_providers().get(provider, {}).get("protocol") or "openai")
+
+
+def _analyze_with_anthropic_compatible(artifacts: Artifacts, config: Config) -> tuple[dict, dict]:
+    if not config.base_url or not config.api_key:
+        raise LlmError("Anthropic-compatible providers require a base URL and API key")
+    from hound.providers import validate_base_url
+
+    base_url = validate_base_url(config.base_url)
+    endpoint = f"{base_url}/messages" if base_url.endswith("/v1") else f"{base_url}/v1/messages"
+    payload = {
+        "model": resolve_model_name(config.provider, config.model, base_url=config.base_url),
+        "system": prompts.SYSTEM_PROMPT,
+        "messages": [{"role": "user", "content": prompts.build_user_prompt(artifacts)}],
+        "max_tokens": int(config.max_tokens),
+        "temperature": float(config.temperature),
+    }
+    request = Request(endpoint, data=json.dumps(payload).encode("utf-8"), headers={
+        "content-type": "application/json",
+        "x-api-key": config.api_key,
+        "anthropic-version": "2023-06-01",
+    }, method="POST")
+    try:
+        with urlopen(request, timeout=config.timeout) as response:
+            body = json.loads(response.read(4 * 1024 * 1024 + 1))
+    except HTTPError as exc:
+        raise LlmError(f"provider returned HTTP {exc.code}", status_code=exc.code) from exc
+    except (OSError, URLError, ValueError) as exc:
+        raise LlmError(f"Anthropic-compatible provider failed: {exc}") from exc
+    blocks = body.get("content", []) if isinstance(body, dict) else []
+    content = "\n".join(block.get("text", "") for block in blocks if isinstance(block, dict) and block.get("type") == "text")
+    usage_raw = body.get("usage", {}) if isinstance(body, dict) else {}
+    usage = {
+        "prompt_tokens": int(usage_raw.get("input_tokens", 0)),
+        "completion_tokens": int(usage_raw.get("output_tokens", 0)),
+    }
+    usage["total_tokens"] = usage["prompt_tokens"] + usage["completion_tokens"]
+    try:
+        return _parse_json_object(content), usage
+    except json.JSONDecodeError as exc:
+        raise LlmError(f"LLM returned invalid JSON: {exc}", usage=usage) from exc
 
 
 def _extract_usage(response: object) -> dict:

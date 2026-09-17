@@ -360,6 +360,15 @@ def has_completed_setup() -> bool:
 def print_results(results: list[IntegrationResult], *, as_json: bool = False, dry_run: bool = False) -> int:
     if as_json:
         print(json.dumps([asdict(result) for result in results], indent=2))
+    elif sys.stdout.isatty():
+        from hound.presentation import show_table
+
+        rows = []
+        for result in results:
+            status = "PLANNED" if dry_run else ("CONFIGURED" if result.installed else "FAILED")
+            detail = ", ".join(result.changed) or ("; ".join(result.warnings) or "Already configured")
+            rows.append((result.harness, "YES" if result.detected else "NO", status, detail))
+        show_table("INTEGRATION SETUP", ["Harness", "Detected", "Status", "Changes"], rows)
     else:
         heading = "Planned integration changes" if dry_run else "Integration setup"
         print(heading)
@@ -381,10 +390,27 @@ def first_run_offer() -> None:
     detected = [name for name, present in detect_harnesses().items() if present]
     if not detected:
         return
-    print("Hound found coding harnesses that are not configured yet:")
-    print("  " + ", ".join(detected))
+    from hound import __version__
+    from hound.presentation import brand_header, console
+    from rich.console import Group
+    from rich.panel import Panel
+    from rich.table import Table
+    from rich.text import Text
+
+    table = Table.grid(padding=(0, 2))
+    table.add_column(style="bold white")
+    table.add_column(style="white")
+    for name in SUPPORTED_HARNESSES:
+        table.add_row("FOUND" if name in detected else "SKIP", f"{name}  " + ("Skill + MCP integration" if name in detected else "Not detected"))
+    body = Group(
+        brand_header(__version__, "First-time setup"),
+        Text("Hound can configure detected coding harnesses. Existing configuration is preserved and backed up before changes.\n", style="white"),
+        table,
+        Text("\nInstall the detected integrations?", style="bold white"),
+    )
+    console().print(Panel(body, title="WELCOME TO HOUND", border_style="white", width=76))
     try:
-        answer = input("Install the Hound skill and available MCP integration now? [y/N] ").strip().lower()
+        answer = input("Install integrations? [y/N] ").strip().lower()
     except (EOFError, KeyboardInterrupt):
         print()
         return
@@ -392,7 +418,7 @@ def first_run_offer() -> None:
         path = _manifest_path()
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(json.dumps({"skipped": True}, indent=2) + "\n", encoding="utf-8")
-        print("Skipped. Run 'hound integrations install --detect' later.")
+        console().print("[dim]Skipped. Run `hound integrations install --detect` later.[/dim]")
         return
     results = install_integrations(detected, scope="global", root=Path.cwd())
     print_results(results)

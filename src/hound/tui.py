@@ -6,6 +6,7 @@ import json as _json
 import math
 import os
 import re
+import shlex
 import shutil
 from collections.abc import Callable
 from dataclasses import replace
@@ -86,8 +87,9 @@ try:
 except Exception:
     pass
 
+from hound import BRAND_NAME
 from hound.config import MAX_CONFIG_BYTES, PROVIDERS
-from hound.collector import DEFAULT_LOG_DIR
+from hound.collector import CollectionInputError, DEFAULT_LOG_DIR
 from hound import service
 from hound.fsio import open_verified_regular, read_bounded_text
 from hound.ingest.logs import parse_log
@@ -175,7 +177,7 @@ Screen { background: #000000; color: #ffffff; }
     overflow-y: auto;
     scrollbar-size-vertical: 0;
 }
-#workspace-nav { width: 100%; height: 7; margin-top: 1; }
+#workspace-nav { width: 100%; height: 11; margin-top: 1; }
 .workspace-nav-row { width: 100%; height: 3; margin-bottom: 1; }
 .workspace-nav-row:last-of-type { margin-bottom: 0; }
 #workspace-nav Button {
@@ -184,10 +186,10 @@ Screen { background: #000000; color: #ffffff; }
     height: 3;
     padding: 0;
     margin: 0;
-    border: tall #ffffff;
+    border: solid #ffffff;
 }
-#nav-home, #nav-results { margin-right: 1; }
-#nav-artifacts, #nav-qa { margin-right: 0; }
+#nav-runs, #nav-results { margin-right: 1; }
+#nav-home, #nav-artifacts, #nav-qa, #nav-settings-spacer { margin-right: 0; }
 #workspace-nav Button.is-active {
     background: #ffffff;
     border: tall #ffffff;
@@ -196,7 +198,7 @@ Screen { background: #000000; color: #ffffff; }
 }
 #content-actions {
     width: 100%;
-    height: auto;
+    height: 3;
     display: none;
     margin: 0 0 1 0;
 }
@@ -204,33 +206,35 @@ Screen { background: #000000; color: #ffffff; }
 .has-back-nav #content-actions {
     display: block;
 }
-#back-button {
+#show-sidebar, #back-button {
     display: none;
     width: 7;
     min-width: 7;
+    max-width: 7;
     height: 3;
+    min-height: 3;
+    max-height: 3;
     margin: 0;
     padding: 0;
     border: tall #ffffff;
+    background: #000000;
+    color: #ffffff;
     content-align: center middle;
     text-align: center;
+    overflow: hidden;
 }
-#back-button:focus {
+#show-sidebar:hover, #show-sidebar:focus,
+#back-button:hover, #back-button:focus {
     border: tall #ffffff;
+    background: #ffffff;
+    color: #000000;
     text-style: bold;
 }
 .has-back-nav #back-button {
     display: block;
 }
 #show-sidebar {
-    display: none;
-    width: 7;
-    min-width: 7;
-    height: 3;
     margin: 0 1 0 0;
-    padding: 0;
-    content-align: center middle;
-    text-align: center;
 }
 .sidebar-collapsed #sidebar { display: none; }
 .sidebar-collapsed #show-sidebar { display: block; }
@@ -400,7 +404,7 @@ MarkdownFence { background: #000000; color: #ffffff; }
 #result-navigation Button { width: 14; margin-right: 1; }
 #result-navigation Button:last-of-type { margin-right: 0; }
 #result-position { width: 1fr; height: 3; color: #ffffff; content-align: center middle; }
-#artifact-workspace, #results-workspace { height: 1fr; padding: 1 2; display: none; }
+#artifact-workspace, #project-runs-workspace, #results-workspace { height: 1fr; padding: 1 2; display: none; }
 #qa-workspace { height: 1fr; padding: 1 2; display: none; }
 #qa-workspace {
     overflow-y: auto;
@@ -426,8 +430,27 @@ MarkdownFence { background: #000000; color: #ffffff; }
 .workspace-filter-input { width: 2fr; height: 3; margin-right: 1; }
 .workspace-filter-select { width: 1fr; height: 3; margin-right: 1; }
 .workspace-filter-select:last-of-type { margin-right: 0; }
-#artifact-workspace-list, #results-workspace-list { height: 1fr; border: solid #ffffff; background: #000000; }
-#artifact-workspace-list:focus, #results-workspace-list:focus { border: solid #ffffff; }
+#artifact-workspace-list, #project-runs-list, #results-workspace-list { height: 1fr; border: solid #ffffff; background: #000000; }
+#artifact-workspace-list:focus, #project-runs-list:focus, #results-workspace-list:focus { border: solid #ffffff; }
+#project-run-detail { height: auto; min-height: 5; padding: 1; margin: 1 0; border: solid #ffffff; }
+#project-runs-start,
+#project-runs-start.-primary {
+    background: #000000;
+    color: #ffffff;
+    border: tall #ffffff;
+    text-style: bold;
+}
+#project-runs-start:hover,
+#project-runs-start:focus,
+#project-runs-start.-active,
+#project-runs-start.-primary:hover,
+#project-runs-start.-primary:focus,
+#project-runs-start.-primary.-active {
+    background: #ffffff;
+    color: #000000;
+    border: tall #ffffff;
+    text-style: bold;
+}
 .workspace-data-panel {
     height: 1fr;
     border: solid #ffffff;
@@ -724,6 +747,20 @@ FeedbackScreen { align: center middle; background: rgba(0, 0, 0, 0.82); }
 HelpScreen { align: center middle; background: rgba(0, 0, 0, 0.85); }
 #help-dialog { width: 76; max-width: 96%; height: auto; border: solid #ffffff; background: #000000; padding: 1 2; }
 #help-close { width: 100%; margin: 1 0 0 0; height: 3; }
+RunProjectScreen { align: center middle; background: rgba(0, 0, 0, 0.85); }
+#run-project-dialog { width: 86; max-width: 96%; height: auto; max-height: 95%; border: solid #ffffff; background: #000000; padding: 1 2 0 2; overflow-y: auto; scrollbar-size-vertical: 0; scrollbar-size-horizontal: 0; }
+#run-project-title { height: 1; color: #ffffff; text-style: bold; margin-bottom: 1; }
+#run-project-description { height: auto; color: #b8b8b8; margin-bottom: 1; }
+#run-project-status { height: auto; color: #ffffff; margin: 0; }
+#run-project-security { height: auto; color: #b8b8b8; margin: 1 0; }
+#run-project-directory-label, #run-project-command-label, #run-project-detected-label, #run-project-recent-label, #run-project-capture-label { height: 1; color: #ffffff; text-style: bold; margin: 1 0 1 0; }
+#run-project-directory, #run-project-command { width: 100%; height: 3; margin: 0; }
+#run-project-capture { width: 100%; height: auto; min-height: 4; padding: 1; margin: 0; border: solid #ffffff; }
+#run-project-detected, #run-project-recent { width: 100%; height: 3; margin: 0; }
+#run-project-detected Button, #run-project-recent Button { width: 1fr; min-width: 0; height: 3; min-height: 3; max-height: 3; margin-right: 1; content-align: center middle; }
+#run-project-detected Button:last-of-type, #run-project-recent Button:last-of-type { margin-right: 0; }
+#run-project-actions { width: 100%; height: auto; align-horizontal: right; margin-top: 0; padding: 1 0; border-top: solid #ffffff; }
+#run-project-cancel, #run-project-submit { width: 18; height: 3; margin-left: 1; }
 SettingsScreen { background: #000000; }
 #settings-page {
     width: 100%;
@@ -816,9 +853,26 @@ SettingsScreen { background: #000000; }
 #connection-actions { width: 100%; height: 3; margin: 1 0 1 0; }
 #connection-actions Button { width: 1fr; margin-right: 1; }
 #connection-actions Button:last-of-type { margin-right: 0; }
+#oauth-risk-notice {
+    height: auto;
+    color: #ffffff;
+    padding: 1 2;
+    margin: 1 0 0 0;
+    border: solid #ffffff;
+}
+#oauth-actions { width: 100%; height: 3; margin: 1 0 0 0; }
+#oauth-actions Button { width: 1fr; min-width: 0; margin-right: 1; }
+#oauth-actions Button:last-of-type { margin-right: 0; }
+#oauth-status { height: auto; color: #ffffff; margin: 1 0; }
 #custom-provider-title { color: #ffffff; text-style: bold; }
-#settings-custom-provider { margin: 0 0 1 0; }
-#settings-custom-provider > Contents { padding: 1; }
+#settings-custom-provider { margin: 1 0 0 0; }
+#settings-custom-provider > Contents { padding: 1 2; }
+#settings-custom-provider Select { margin: 0 0 1 0; }
+#settings-custom-provider .settings-label {
+    height: 2;
+    margin: 0 0 1 0;
+    content-align: left bottom;
+}
 #settings-actions {
     width: 100%;
     height: auto;
@@ -827,7 +881,10 @@ SettingsScreen { background: #000000; }
     padding: 1 0;
     border-top: solid #ffffff;
 }
-#settings-add-provider { width: 100%; margin: 0; }
+#custom-provider-actions { width: 100%; height: 3; }
+#custom-provider-actions Button { width: 1fr; margin-right: 1; }
+#custom-provider-actions Button:last-of-type { margin-right: 0; }
+#custom-provider-status { height: auto; min-height: 1; margin: 0 0 1 0; }
 .custom-field { margin: 0 0 1 0; }
 #settings-save { width: 20; }
 #settings-cancel { width: 20; margin-right: 1; }
@@ -854,7 +911,7 @@ SettingsScreen { background: #000000; }
 .compact .pagination-controls { height: auto; layout: vertical; }
 .compact .pagination-controls Button { width: 100%; min-width: 0; margin: 0 0 1 0; }
 .compact .pagination-label { width: 100%; height: auto; padding: 0; margin: 0 0 1 0; }
-.compact #artifact-workspace, .compact #results-workspace { padding: 1 1; overflow-y: auto; }
+.compact #artifact-workspace, .compact #project-runs-workspace, .compact #results-workspace { padding: 1 1; overflow-y: auto; }
 .compact #qa-workspace { padding: 1 1; overflow-y: auto; }
 .compact .qa-form-row { layout: vertical; }
 .compact .qa-field { width: 100%; margin: 0 0 1 0; }
@@ -880,10 +937,18 @@ SettingsScreen { background: #000000; }
 .compact .settings-toggle-row Button { width: 100%; margin: 0 0 1 0; }
 .compact #connection-actions { height: auto; layout: vertical; }
 .compact #connection-actions Button { width: 100%; margin: 0 0 1 0; }
-.compact #back-button { width: 7; min-width: 7; margin: 0; padding: 0; }
-.compact #show-sidebar { width: 7; min-width: 7; margin: 0 1 0 0; padding: 0; }
+.compact #show-sidebar, .compact #back-button {
+    width: 7;
+    min-width: 7;
+    max-width: 7;
+    height: 3;
+    min-height: 3;
+    max-height: 3;
+    margin: 0 1 0 0;
+    padding: 0;
+}
 .short #workflow-title { height: 2; margin: 0; }
-.short #workspace-nav { height: 7; margin-top: 0; }
+.short #workspace-nav { height: 11; margin-top: 0; }
 .short .workspace-nav-row, .short #workspace-nav Button { height: 3; }
 .short .field-label { height: 1; margin: 0; padding-top: 0; }
 .short .feedback-label, .short .feedback-field .field-label { height: 1; margin-bottom: 1; }
@@ -897,7 +962,16 @@ SettingsScreen { background: #000000; }
 .short #log-list, .short #run-list { min-height: 4; height: auto; max-height: 7; }
 .short #open-settings { margin: 0; }
 .short #content-actions { margin-bottom: 0; }
-.short #back-button, .short #show-sidebar { height: 3; margin-top: 0; margin-bottom: 0; }
+.short #back-button, .short #show-sidebar {
+    width: 7;
+    min-width: 7;
+    max-width: 7;
+    height: 3;
+    min-height: 3;
+    max-height: 3;
+    margin-top: 0;
+    margin-bottom: 0;
+}
 .short #qa-history-list { height: 6; }
 .short #home-logo { display: block; height: 1; margin: 0; }
 .short #home-subtitle { margin: 0; }
@@ -908,14 +982,14 @@ SettingsScreen { background: #000000; }
 .short #home-guides .home-guide { height: auto; min-height: 4; padding: 0 1; }
 .short #home-formats { padding: 0 1; margin-bottom: 1; }
 
-Screen, SettingsScreen, ClearResultsScreen, FeedbackScreen, HelpScreen {
+Screen, SettingsScreen, ClearResultsScreen, FeedbackScreen, HelpScreen, RunProjectScreen {
     background: #000000;
     color: #ffffff;
 }
 #app-title, #sidebar, #workflow-status, Input, SelectCurrent,
 #home-next, .home-card, #home-guides .home-guide, #home-formats, Tabs,
 .result-scroll, Markdown, MarkdownBlockQuote, MarkdownFence, #qa-status, #qa-result,
-#investigation, #clear-dialog, #feedback-dialog, #help-dialog, #settings-panel,
+#investigation, #clear-dialog, #feedback-dialog, #help-dialog, #run-project-dialog, #settings-panel,
 #settings-trust, #engine-summary, #session-summary, #shortcutbar, #statusbar {
     background: #000000;
     color: #ffffff;
@@ -958,9 +1032,9 @@ Button:disabled, Button.-primary:disabled, Button.-warning:disabled,
     text-style: none;
 }
 #home-next, .home-card, #home-guides .home-guide, #home-formats,
-#clear-dialog, #feedback-dialog, #help-dialog, #settings-panel,
+#clear-dialog, #feedback-dialog, #help-dialog, #run-project-dialog, #settings-panel,
 .settings-section, .feedback-section { border: solid #ffffff; }
-#log-list, #run-list, #artifact-workspace-list, #results-workspace-list,
+#log-list, #run-list, #artifact-workspace-list, #project-runs-list, #results-workspace-list,
 #qa-history-list {
     background: #000000;
     border: solid #ffffff;
@@ -976,11 +1050,19 @@ ListItem.-highlight, #artifact-workspace-list > ListItem.-highlight,
 }
 Underline > .underline--bar { color: #ffffff; background: #ffffff; }
 #back-button, #show-sidebar {
-    border: tall #ffffff;
+    border: solid #ffffff;
     text-style: bold;
 }
 #back-button:hover, #back-button:focus,
-#show-sidebar:hover, #show-sidebar:focus { background: #ffffff; color: #000000; }
+#back-button.-active, #show-sidebar:hover, #show-sidebar:focus,
+#show-sidebar.-active {
+    background: #ffffff !important;
+    background-tint: transparent;
+    tint: transparent;
+    color: #000000;
+    border: inner #ffffff !important;
+    text-style: bold;
+}
 #back-button:disabled, #clear-selected:disabled, #clear-all:disabled,
 #settings-offline:disabled {
     background: #2b2b2b;
@@ -1710,6 +1792,14 @@ def _investigation_text(
     return "\n".join(lines)
 
 
+class NavigationButton(Button):
+    def render(self) -> Text:
+        label = self.label.copy()
+        label.align("center", self.content_size.width)
+        label.stylize_before(self.rich_style)
+        return label
+
+
 class ResultScroll(VerticalScroll):
     """Keyboard scrolling shared by the read-only result panes."""
 
@@ -1804,22 +1894,24 @@ class HelpScreen(ModalScreen[None]):
             "[bold #ffffff]Hound Tracer Keyboard Shortcuts[/bold #ffffff]\n",
             "[bold #8f8f8f]WORKSPACES & VIEWS[/bold #8f8f8f]",
             row("h", "Home", "f", "Artifacts"),
-            row("l", "Results", "y", "Quality & gates"),
-            row("i", "Current run overview", "m", "Toggle sidebar"),
+            row("j", "Project runs", "l", "Results"),
+            row("y", "Quality & gates", "i", "Current run overview"),
+            row("m", "Toggle sidebar"),
             "  [dim]Tabs: Overview · Report · Ticket · Raw log · Context[/dim]\n",
             "[bold #8f8f8f]ACTIONS & ANALYSIS[/bold #8f8f8f]",
             row("a", "Analyze selected", "A", "Analyze all filtered"),
             row("x", "Stop active analysis", "X", "Clear all results"),
             row("z / d", "Select / deselect all", "space", "Select / deselect one"),
             row("enter", "Open selected result", "v", "Record feedback"),
-            row("c", "Copy report (md)", "e", "Copy ticket (md)"),
+            row("c", "Copy active report/ticket", "", ""),
             row("r", "Reload / refresh", "k", "Unfocus active field"),
             "\n[bold #8f8f8f]NAVIGATION & CONTROLS[/bold #8f8f8f]",
             row("esc", "Back / dismiss", "g", "Focus active list"),
             row("p / n", "Prev / next page", "b", "Browse folder"),
             row("o", "Toggle offline", "u", "Validate Context"),
             row("s", "Settings overlay", "m", "Toggle sidebar"),
-            row("?", "Help reference", "q", "Quit Hound Tracer"),
+            row("?", "Help reference", "q", "Exit / return to launcher"),
+            row("Ctrl+C", "Quit Hound Tracer"),
         ])
         with Vertical(id="help-dialog"):
             yield Static(content)
@@ -1845,7 +1937,7 @@ class SettingsScreen(ModalScreen[None]):
     def action_scroll_page_down(self) -> None:
         self.query_one("#settings-panel", Vertical).scroll_page_down(animate=False)
 
-    def __init__(self, app: "RcaTui") -> None:
+    def __init__(self, app: "HoundTui") -> None:
         super().__init__()
         self._app = app
         self._offline = app.offline
@@ -1931,6 +2023,37 @@ class SettingsScreen(ModalScreen[None]):
                     with Horizontal(id="connection-actions"):
                         yield Button("Disconnect", id="settings-disconnect")
                         yield Button("Connect & discover", id="settings-connect", variant="primary")
+                    yield Static(
+                        "SUBSCRIPTION / OAUTH LOGIN\n"
+                        "This provider uses a subscription/OAuth session not officially licensed for proxy/router use. "
+                        "Account may be restricted or banned. Use at your own risk.",
+                        id="oauth-risk-notice",
+                    )
+                    with Horizontal(id="oauth-actions"):
+                        yield Button("OpenAI / Codex", id="settings-oauth-openai")
+                        yield Button("Claude Code", id="settings-oauth-claude")
+                        yield Button("Gemini CLI", id="settings-oauth-gemini")
+                    yield Static("Select a button to accept the notice and start provider login.", id="oauth-status")
+                    with Collapsible(title="Custom provider", collapsed=True, id="settings-custom-provider"):
+                        yield Select(
+                            [("OpenAI-compatible", "openai"), ("Anthropic-compatible", "anthropic")],
+                            value="openai",
+                            id="custom-provider-protocol",
+                        )
+                        yield Static("Name", classes="settings-label")
+                        yield Input(placeholder="OpenAI Compatible (Prod)", id="custom-provider-name", classes="custom-field")
+                        yield Static("Prefix", classes="settings-label")
+                        yield Input(placeholder="oa-prod", id="custom-provider-id", classes="custom-field")
+                        yield Static("Base URL", classes="settings-label")
+                        yield Input(placeholder="https://api.openai.com/v1", id="custom-provider-url", classes="custom-field")
+                        yield Static("API Key (for Check)", classes="settings-label")
+                        yield Input(placeholder="provider API key", password=True, id="custom-provider-api-key", classes="custom-field")
+                        yield Static("Model ID (optional)", classes="settings-label")
+                        yield Input(placeholder="e.g. gpt-4.1", id="custom-provider-model", classes="custom-field")
+                        yield Static("", id="custom-provider-status")
+                        with Horizontal(id="custom-provider-actions"):
+                            yield Button("Check", id="settings-check-provider")
+                            yield Button("Create", id="settings-add-provider", variant="primary")
                 with Vertical(classes="settings-section"):
                     yield Static("EVIDENCE & TRUST", id="settings-context-title")
                     yield Static(
@@ -1979,17 +2102,6 @@ class SettingsScreen(ModalScreen[None]):
                         yield Static("LLM retries per request (0-10)", classes="settings-label")
                         yield Input(value=str(self._max_retries), placeholder="3", id="settings-max-retries")
                     yield Static(id="settings-session-paths")
-                with Collapsible(title="Custom provider", collapsed=True, id="settings-custom-provider"):
-                    with Horizontal(classes="settings-pair"):
-                        with Vertical(classes="settings-field"):
-                            yield Static("Provider ID", classes="settings-label")
-                            yield Input(placeholder="provider-id", id="custom-provider-id", classes="custom-field")
-                        with Vertical(classes="settings-field"):
-                            yield Static("Display name", classes="settings-label")
-                            yield Input(placeholder="Provider name", id="custom-provider-name", classes="custom-field")
-                    yield Input(placeholder="https://models.example.com/v1", id="custom-provider-url", classes="custom-field")
-                    yield Input(placeholder="preferred model (optional)", id="custom-provider-model", classes="custom-field")
-                    yield Button("Add OpenAI-compatible provider", id="settings-add-provider")
                 with Horizontal(id="settings-actions"):
                     yield Button("Cancel", id="settings-cancel")
                     yield Button("Save settings", id="settings-save", variant="primary")
@@ -2033,11 +2145,14 @@ class SettingsScreen(ModalScreen[None]):
             api_key = self.query_one("#settings-api-key", Input)
             connect = self.query_one("#settings-connect", Button)
             disconnect = self.query_one("#settings-disconnect", Button)
+            oauth_buttons = tuple(self.query_one(f"#settings-oauth-{name}", Button) for name in ("openai", "claude", "gemini"))
             offline_button.disabled = not policy.allow_llm
             offline_button.label = self._offline_label()
             offline_button.set_class(policy.allow_llm and not self._offline, "is-llm")
             online_controls_disabled = self._offline or not policy.allow_llm
             for control in (provider_select, model_select, manual_model, base_url, api_key, connect, disconnect):
+                control.disabled = online_controls_disabled
+            for control in oauth_buttons:
                 control.disabled = online_controls_disabled
             source_button.disabled = not policy.allow_source_context
             enrich_button.disabled = not policy.allow_enrichment
@@ -2125,14 +2240,30 @@ class SettingsScreen(ModalScreen[None]):
                 f"[{SEMANTIC_WARNING}][WARN] Not connected[/{SEMANTIC_WARNING}]"
             )
             return
+        oauth_providers = {
+            "settings-oauth-openai": "openai-oauth",
+            "settings-oauth-claude": "claude-oauth",
+            "settings-oauth-gemini": "gemini-oauth",
+        }
+        if event.button.id in oauth_providers:
+            provider = oauth_providers[event.button.id]
+            self.query_one("#oauth-status", Static).update(f"Starting {provider} login through the official CLI…")
+            for name in ("openai", "claude", "gemini"):
+                self.query_one(f"#settings-oauth-{name}", Button).disabled = True
+            self._login_subscription_provider(provider)
+            return
         if event.button.id == "settings-add-provider":
             provider_id = self.query_one("#custom-provider-id", Input).value.strip()
+            api_key = self.query_one("#custom-provider-api-key", Input).value.strip()
             try:
                 save_custom_provider(provider_id, {
                     "name": self.query_one("#custom-provider-name", Input).value.strip() or provider_id,
                     "base_url": self.query_one("#custom-provider-url", Input).value.strip(),
                     "default_model": self.query_one("#custom-provider-model", Input).value.strip(),
+                    "protocol": str(self.query_one("#custom-provider-protocol", Select).value),
                 })
+                if api_key:
+                    set_api_key(provider_id, api_key)
             except Exception as exc:
                 self._app.notify(f"Could not add provider: {exc}", severity="error")
                 return
@@ -2148,6 +2279,16 @@ class SettingsScreen(ModalScreen[None]):
                 self._app.notify(f"Provider saved, but the list could not refresh: {exc}", severity="warning")
                 return
             self._app.notify(f"Provider {provider_id} added and selected", timeout=4)
+            return
+        if event.button.id == "settings-check-provider":
+            provider_id = self.query_one("#custom-provider-id", Input).value.strip() or "custom-check"
+            protocol = str(self.query_one("#custom-provider-protocol", Select).value)
+            base_url = self.query_one("#custom-provider-url", Input).value.strip()
+            api_key = self.query_one("#custom-provider-api-key", Input).value.strip()
+            model = self.query_one("#custom-provider-model", Input).value.strip()
+            event.button.disabled = True
+            self.query_one("#custom-provider-status", Static).update("Checking provider…")
+            self._check_custom_provider(provider_id, protocol, base_url, api_key, model)
             return
         if event.button.id == "settings-save" and not getattr(self, "_processing_deferred_save", False):
             # Apply toggle events posted immediately before Save before reading the form state.
@@ -2247,6 +2388,20 @@ class SettingsScreen(ModalScreen[None]):
             self._processing_deferred_save = False
 
     def on_select_changed(self, event: Select.Changed) -> None:
+        if event.select.id == "custom-provider-protocol":
+            anthropic = str(event.value) == "anthropic"
+            self.query_one("#custom-provider-name", Input).placeholder = (
+                "Anthropic Compatible (Prod)" if anthropic else "OpenAI Compatible (Prod)"
+            )
+            self.query_one("#custom-provider-id", Input).placeholder = "ac-prod" if anthropic else "oa-prod"
+            self.query_one("#custom-provider-url", Input).placeholder = (
+                "https://api.anthropic.com/v1" if anthropic else "https://api.openai.com/v1"
+            )
+            self.query_one("#custom-provider-model", Input).placeholder = (
+                "e.g. claude-sonnet-4-5" if anthropic else "e.g. gpt-4.1"
+            )
+            self.query_one("#custom-provider-status", Static).update("")
+            return
         if event.select.id == "settings-source-class":
             self._source_class = str(event.value)
             if self._source_class == "fork_pr":
@@ -2281,6 +2436,60 @@ class SettingsScreen(ModalScreen[None]):
             self._app.call_from_thread(self._finish_connection, provider, [], exc)
             return
         self._app.call_from_thread(self._finish_connection, provider, models, None)
+
+    @work(thread=True, exclusive=True, group="subscription-login")
+    def _login_subscription_provider(self, provider: str) -> None:
+        from hound.subscription_auth import accept_risk, login
+
+        try:
+            accept_risk(provider)
+            code = login(provider)
+            if code:
+                raise RuntimeError(f"provider CLI exited with status {code}")
+        except Exception as exc:
+            self._app.call_from_thread(self._finish_subscription_login, provider, exc)
+            return
+        self._app.call_from_thread(self._finish_subscription_login, provider, None)
+
+    def _finish_subscription_login(self, provider: str, error: Exception | None) -> None:
+        if not self.is_mounted:
+            return
+        for name in ("openai", "claude", "gemini"):
+            self.query_one(f"#settings-oauth-{name}", Button).disabled = self._offline
+        if error is not None:
+            self.query_one("#oauth-status", Static).update(f"[{SEMANTIC_ERROR}]Login failed: {escape(error)}[/{SEMANTIC_ERROR}]")
+            self._app.notify(f"OAuth login failed: {error}", severity="error")
+            return
+        self.query_one("#oauth-status", Static).update(f"[{SEMANTIC_SUCCESS}]Login complete: {provider}[/{SEMANTIC_SUCCESS}]")
+        provider_select = self.query_one("#settings-provider", Select)
+        provider_select.value = provider
+        self._app.notify(f"Logged in and selected {provider}", timeout=4)
+
+    @work(thread=True, exclusive=True, group="custom-provider-check")
+    def _check_custom_provider(self, provider: str, protocol: str, base_url: str, api_key: str, model: str) -> None:
+        try:
+            if protocol == "anthropic":
+                if not model:
+                    raise ValueError("Model ID is required to check an Anthropic-compatible provider")
+                from hound.providers import check_anthropic_compatible
+
+                check_anthropic_compatible(base_url, api_key, model)
+            else:
+                discover_models(base_url, api_key)
+        except Exception as exc:
+            self._app.call_from_thread(self._finish_custom_provider_check, provider, exc)
+            return
+        self._app.call_from_thread(self._finish_custom_provider_check, provider, None)
+
+    def _finish_custom_provider_check(self, provider: str, error: Exception | None) -> None:
+        if not self.is_mounted:
+            return
+        self.query_one("#settings-check-provider", Button).disabled = False
+        status = self.query_one("#custom-provider-status", Static)
+        if error is not None:
+            status.update(f"[{SEMANTIC_ERROR}]Check failed: {escape(error)}[/{SEMANTIC_ERROR}]")
+            return
+        status.update(f"[{SEMANTIC_SUCCESS}]Provider {escape(provider)} is reachable[/{SEMANTIC_SUCCESS}]")
 
     def _finish_connection(self, provider: str, models: list[str], error: Exception | None) -> None:
         if not self.is_mounted:
@@ -2321,7 +2530,7 @@ class FeedbackScreen(ModalScreen[None]):
     def action_scroll_page_down(self) -> None:
         self.query_one("#feedback-dialog", Vertical).scroll_page_down(animate=False)
 
-    def __init__(self, app: "RcaTui", run_dir: Path) -> None:
+    def __init__(self, app: "HoundTui", run_dir: Path) -> None:
         super().__init__()
         self._app = app
         self._run_dir = run_dir
@@ -2531,7 +2740,7 @@ class ClearResultsScreen(ModalScreen[None]):
 
     BINDINGS = [Binding("escape", "dismiss", "Cancel", show=False)]
 
-    def __init__(self, app: "RcaTui", run_dirs: list[Path], *, clear_all: bool = False) -> None:
+    def __init__(self, app: "HoundTui", run_dirs: list[Path], *, clear_all: bool = False) -> None:
         super().__init__()
         self._app = app
         self._run_dirs = run_dirs
@@ -2568,8 +2777,135 @@ class ClearResultsScreen(ModalScreen[None]):
             self._app.clear_results(self._run_dirs)
 
 
-class RcaTui(App):
-    TITLE = "Hound Tracer"
+class RunProjectScreen(ModalScreen[None]):
+    BINDINGS = [Binding("escape", "dismiss", "Cancel", show=False)]
+
+    def __init__(self, app: "HoundTui") -> None:
+        super().__init__()
+        self._app = app
+        self._command_directory = app.logs_dir
+
+    def compose(self) -> ComposeResult:
+        detected = self._detected_commands()
+        recent = self._recent_commands()
+        with Vertical(id="run-project-dialog"):
+            yield Static("RUN PROJECT", id="run-project-title")
+            yield Static(
+                "Run a project command and collect evidence created or changed while it executes.",
+                id="run-project-description",
+            )
+            yield Static("WORKING DIRECTORY", id="run-project-directory-label")
+            yield Input(value=str(self._command_directory), id="run-project-directory")
+            yield Static("COMMAND", id="run-project-command-label")
+            yield Input(placeholder="pytest -q  /  npm test  /  cargo test", id="run-project-command")
+            if detected:
+                yield Static("DETECTED COMMANDS", id="run-project-detected-label")
+                with Horizontal(id="run-project-detected"):
+                    for index, (label, _command) in enumerate(detected):
+                        yield Button(_compact(label, 20), id=f"run-project-detected-{index}")
+            if recent:
+                yield Static("RECENT COMMANDS", id="run-project-recent-label")
+                with Horizontal(id="run-project-recent"):
+                    for index, command in enumerate(recent):
+                        yield Button(_compact(command, 24), id=f"run-project-recent-{index}")
+            yield Static("CAPTURE", id="run-project-capture-label")
+            yield Static(self._capture_summary(self._command_directory), id="run-project-capture")
+            yield Static(
+                "Executes checkout-controlled code without a sandbox. Output is bounded and redacted before storage; the run stops after 5 minutes.",
+                id="run-project-security",
+            )
+            yield Static("", id="run-project-status")
+            with Horizontal(id="run-project-actions"):
+                yield Button("Cancel", id="run-project-cancel")
+                yield Button("Run project", id="run-project-submit", disabled=True)
+
+    def on_mount(self) -> None:
+        self.query_one("#run-project-command", Input).focus()
+
+    def on_input_submitted(self, event: Input.Submitted) -> None:
+        if event.input.id == "run-project-command":
+            self._submit()
+
+    def on_input_changed(self, event: Input.Changed) -> None:
+        if event.input.id in {"run-project-command", "run-project-directory"}:
+            self._validate_inputs(show_error=False)
+        if event.input.id == "run-project-directory":
+            directory = Path(event.value).expanduser()
+            self.query_one("#run-project-capture", Static).update(self._capture_summary(directory))
+
+    def on_button_pressed(self, event: Button.Pressed) -> None:
+        if event.button.id == "run-project-cancel":
+            self.dismiss()
+        elif event.button.id == "run-project-submit":
+            self._submit()
+        elif event.button.id and event.button.id.startswith("run-project-recent-"):
+            try:
+                index = int(event.button.id.rsplit("-", 1)[1])
+                self.query_one("#run-project-command", Input).value = self._recent_commands()[index]
+                self.query_one("#run-project-command", Input).focus()
+            except (IndexError, ValueError):
+                return
+        elif event.button.id and event.button.id.startswith("run-project-detected-"):
+            try:
+                index = int(event.button.id.rsplit("-", 1)[1])
+                command = self._detected_commands()[index][1]
+                self.query_one("#run-project-command", Input).value = shlex.join(command)
+                self.query_one("#run-project-command", Input).focus()
+            except (IndexError, ValueError):
+                return
+
+    def _detected_commands(self) -> list[tuple[str, list[str]]]:
+        return _discover_project_commands(self._command_directory)
+
+    def _recent_commands(self) -> list[str]:
+        commands = []
+        for record in self._app._project_runs:
+            command = record.get("command")
+            if not isinstance(command, list) or not all(isinstance(item, str) for item in command):
+                continue
+            rendered = shlex.join(command)
+            if rendered not in commands:
+                commands.append(rendered)
+            if len(commands) == 3:
+                break
+        return commands
+
+    def _capture_summary(self, directory: Path) -> str:
+        return (
+            f"[bold]Output directory[/bold]\n{escape(str(self._app._capture_directory(directory)))}\n"
+            "[bold]Supported formats[/bold]  .log · JUnit XML · SARIF · test-report JSON"
+        )
+
+    def _submit(self) -> None:
+        if not self._validate_inputs(show_error=True):
+            return
+        command_text = self.query_one("#run-project-command", Input).value.strip()
+        directory = Path(self.query_one("#run-project-directory", Input).value.strip()).expanduser().resolve()
+        try:
+            command = shlex.split(command_text, posix=os.name != "nt")
+        except ValueError as exc:
+            self.query_one("#run-project-status", Static).update(f"Invalid command: {escape(str(exc))}")
+            return
+        self.dismiss()
+        self._app.start_project_run(command, cwd=directory)
+
+    def _validate_inputs(self, *, show_error: bool) -> bool:
+        command_text = self.query_one("#run-project-command", Input).value.strip()
+        directory_text = self.query_one("#run-project-directory", Input).value.strip()
+        error = ""
+        if not directory_text:
+            error = "Enter a working directory."
+        elif not Path(directory_text).expanduser().is_dir():
+            error = "Working directory does not exist or is not a directory."
+        elif not command_text:
+            error = "Enter a command to run."
+        self.query_one("#run-project-submit", Button).disabled = bool(error)
+        self.query_one("#run-project-status", Static).update(error if show_error else "")
+        return not error
+
+
+class HoundTui(App):
+    TITLE = BRAND_NAME
     SUB_TITLE = ""
     CSS = CSS
     BINDINGS = [
@@ -2578,14 +2914,15 @@ class RcaTui(App):
         Binding("x", "stop_or_clear_selected", "Stop/Clear selected", show=False),
         Binding("ctrl+x", "stop_analysis", "Stop analysis", show=False),
         Binding("r", "refresh", "Refresh", show=False),
+        Binding("ctrl+r", "run_project", "Run project", show=False),
         Binding("o", "toggle_offline", "Toggle Offline", show=False),
         Binding("c", "copy_report", "Copy Report", show=False),
-        Binding("e", "copy_ticket", "Copy Ticket", show=False),
         Binding("b", "browse_directory", "Browse Folder", show=False),
         Binding("h", "home", "Home", show=False),
         Binding("s", "open_settings", "Settings", show=False),
         Binding("m", "toggle_sidebar", "Toggle sidebar", show=False),
         Binding("f", "show_artifacts", "Artifacts", show=False),
+        Binding("j", "show_project_runs", "Runs", show=False),
         Binding("l", "show_results", "Results", show=False),
         Binding("y", "show_qa", "Quality", show=False),
         Binding("i", "show_overview", "Overview", show=False),
@@ -2600,19 +2937,17 @@ class RcaTui(App):
         Binding("enter", "select_log", "Open", show=False),
         Binding("g", "focus_file_list", "Focus List", show=False),
         Binding("?", "show_help", "Help", show=False),
+        Binding("q", "exit_tui", "Exit", show=False),
         Binding("k", "unfocus", "Unfocus", show=False, priority=True),
         Binding("B", "back", "Back", show=False),
         Binding("escape", "back", "Back", show=False),
-        Binding("q", "quit", "Quit", show=False),
+        Binding("ctrl+c", "quit", "Quit", show=False, priority=True),
     ]
 
     async def on_event(self, event: events.Event) -> None:
         if isinstance(event, events.Key) and not event.is_forwarded:
             if event.key == "k":
                 await self.run_action("unfocus")
-                return
-            if event.key == "ctrl+c" and self._analyzing:
-                self.action_stop_analysis()
                 return
             editing_input = isinstance(self.focused, Input)
             if not editing_input and event.key in {"left", "right"} and self._cycle_result_tab(-1 if event.key == "left" else 1):
@@ -2647,6 +2982,7 @@ class RcaTui(App):
         jobs: int | None = None,
         max_llm_calls: int | None = None,
         max_cost_usd: float | None = None,
+        return_to_launcher: bool = False,
     ):
         super().__init__()
         self.logs_dir = Path(logs_dir) if logs_dir else (DEFAULT_LOG_DIR if DEFAULT_LOG_DIR.is_dir() else Path.cwd())
@@ -2703,6 +3039,7 @@ class RcaTui(App):
         self.api_key = api_key
         self.redact = analysis_config.redact
         self.no_dedup = bool(resolved_no_dedup)
+        self.return_to_launcher = return_to_launcher
         self.max_retries = analysis_config.max_retries
         self.repo_dir = (repo_dir or None) if repo_dir is not None else preferences["repo_dir"]
         self.source_context = source_context if source_context is not None else preferences["source_context"]
@@ -2714,6 +3051,7 @@ class RcaTui(App):
         self.max_cost_usd = max_cost_usd
         self._analysis_config = analysis_config
         self._log_files: list[Path] = []
+        self._discovered_log_files: list[Path] | None = None
         self._visible_log_files: list[Path] = []
         self._selected_artifacts: set[Path] = set()
         self._selected_artifact_order: list[Path] = []
@@ -2730,14 +3068,19 @@ class RcaTui(App):
         self._runs: list[Path] = []
         self._opened_runs: list[Path] = []
         self._run_index: list[dict] = []
+        self._project_runs: list[dict] = []
+        self._selected_project_run: dict | None = None
         self._run_filter_timer = None
         self._analyzing = False
+        self._running_project = False
+        self._project_cancel_requested = Event()
+        self._active_project_request: service.ProjectRunRequest | None = None
         self._stop_requested = Event()
         self._progress = 0
         self._progress_timer = None
         self._selected_log: Path | None = None
         self._last_duration: float | None = None
-        self._sidebar_collapsed = False
+        self._sidebar_collapsed = True
         self._report_markdown = "_No report loaded._"
         self._ticket_markdown = "_No ticket draft loaded._"
         self._current_doc: dict | None = None
@@ -2758,6 +3101,8 @@ class RcaTui(App):
                 with Vertical(id="workspace-nav"):
                     with Horizontal(classes="workspace-nav-row"):
                         yield Button("Home", id="nav-home")
+                    with Horizontal(classes="workspace-nav-row"):
+                        yield Button("Runs", id="nav-runs")
                         yield Button("Artifacts", id="nav-artifacts")
                     with Horizontal(classes="workspace-nav-row"):
                         yield Button("Results", id="nav-results")
@@ -2788,10 +3133,15 @@ class RcaTui(App):
                 yield Static("RECENT RUNS", id="recent-runs-title", classes="field-label sidebar-section-title sidebar-detail")
                 yield ListView(id="run-list", classes="sidebar-detail")
                 yield Button("Settings", id="open-settings", classes="sidebar-button")
+                yield Button(
+                    "Return to launcher" if self.return_to_launcher else "Exit Hound Tracer",
+                    id="exit-tui",
+                    classes="sidebar-button",
+                )
             with Vertical(id="content"):
                 with Horizontal(id="content-actions"):
-                    yield Button("===", id="show-sidebar")
-                    yield Button("<--", id="back-button")
+                    yield NavigationButton("≡", id="show-sidebar")
+                    yield NavigationButton("←", id="back-button")
                 with Vertical(id="home"):
                     yield HomeLogo(HOUND_LOGO, id="home-logo")
                     yield Static("CI/CD FAILURE INVESTIGATION TOOL", id="home-subtitle")
@@ -2838,6 +3188,18 @@ class RcaTui(App):
                             yield Button("Deselect all", id="workspace-deselect-all", disabled=True)
                             yield Button("Browse", id="workspace-browse")
                             yield Button("Reload", id="workspace-refresh")
+                with Vertical(id="project-runs-workspace"):
+                    yield Static("PROJECT RUNS", classes="workspace-title")
+                    yield Static(id="project-runs-meta", classes="workspace-meta")
+                    yield ListView(id="project-runs-list")
+                    yield Static(
+                        "No project run selected. Run a command to capture its output and generated artifacts.",
+                        id="project-run-detail",
+                    )
+                    with Horizontal(classes="workspace-action-row"):
+                        yield Button("Run project", id="project-runs-start")
+                        yield Button("Run again", id="project-runs-rerun", disabled=True)
+                        yield Button("Show artifacts", id="project-runs-artifacts", disabled=True)
                 with Vertical(id="results-workspace"):
                     yield Static("ANALYSIS RESULTS", classes="workspace-title")
                     yield Static(id="results-workspace-meta", classes="workspace-meta")
@@ -3023,6 +3385,7 @@ class RcaTui(App):
     def on_mount(self) -> None:
         self.set_class(self.size.width < 100, "compact")
         self.set_class(self.size.height < 30, "short")
+        self.set_class(self._sidebar_collapsed, "sidebar-collapsed")
         self._update_statusbar()
         self._update_shortcuts()
         self._refresh_provider_hint()
@@ -3102,11 +3465,12 @@ class RcaTui(App):
         tabs = self._get_tabs()
         if tabs is not None and tabs.display:
             return ("results_tab", tabs.active)
-        for name in ("artifact", "results", "qa"):
+        for name in ("artifact", "project-runs", "results", "qa"):
             try:
                 ws = self.query_one(f"#{name}-workspace", Vertical)
                 if ws.display:
-                    return ("workspace", "artifacts" if name == "artifact" else name)
+                    workspace = "artifacts" if name == "artifact" else ("runs" if name == "project-runs" else name)
+                    return ("workspace", workspace)
             except Exception:
                 pass
         return ("home", None)
@@ -3164,7 +3528,7 @@ class RcaTui(App):
             common = f"{back_hint}{analyze_hint}[{key}]b[/{key}] browse  [{key}]m[/{key}] sidebar  [{key}]h[/{key}] home  [{key}]r[/{key}] refresh  [{key}]s[/{key}] settings  [{key}]?[/{key}] help  [{key}]q[/{key}] quit"
         contextual = {
             "pane-report": f"[{key}]c[/{key}] copy report  ",
-            "pane-ticket": f"[{key}]e[/{key}] copy ticket  ",
+            "pane-ticket": f"[{key}]c[/{key}] copy ticket  ",
             "pane-raw": f"[{key}]enter[/{key}] open log  ",
         }.get(active, "")
         if tabs is not None and tabs.display and len(self._opened_runs) > 1:
@@ -3186,6 +3550,12 @@ class RcaTui(App):
                     f"[{key}]space[/{key}] toggle  [{key}]p / n[/{key}] prev/next page  "
                 )
         try:
+            project_runs_ws: Vertical | None = self.query_one("#project-runs-workspace", Vertical)
+        except Exception:
+            project_runs_ws = None
+        if project_runs_ws is not None and project_runs_ws.display:
+            contextual = f"[{key}]ctrl+r[/{key}] run project  [{key}]enter[/{key}] details  "
+        try:
             results_ws: Vertical | None = self.query_one("#results-workspace", Vertical)
         except Exception:
             results_ws = None
@@ -3202,7 +3572,7 @@ class RcaTui(App):
         if qa_ws is not None and qa_ws.display:
             contextual = f"[{key}]g[/{key}] focus QA result  [{key}]tab[/{key}] move field  "
         if tabs is not None and tabs.display and active == "pane-context":
-            contextual = f"[{key}]u[/{key}] validate  [{key}]v[/{key}] feedback  [{key}]c[/{key}] copy summary  [{key}]g[/{key}] focus context  "
+            contextual = f"[{key}]u[/{key}] validate  [{key}]v[/{key}] feedback  [{key}]g[/{key}] focus context  "
         if tabs is not None and tabs.display:
             contextual = f"[{key}]← / →[/{key}] tabs  " + contextual
         separator = "  [dim]|[/dim]  " if contextual.strip() else ""
@@ -3216,6 +3586,7 @@ class RcaTui(App):
             self._view_history.clear()
         self.query_one("#home", Vertical).display = True
         self.query_one("#artifact-workspace", Vertical).display = False
+        self.query_one("#project-runs-workspace", Vertical).display = False
         self.query_one("#results-workspace", Vertical).display = False
         self.query_one("#qa-workspace", Vertical).display = False
         tabs = self._get_tabs()
@@ -3232,6 +3603,7 @@ class RcaTui(App):
             self._record_view_transition(("results_tab", pane))
         self.query_one("#home", Vertical).display = False
         self.query_one("#artifact-workspace", Vertical).display = False
+        self.query_one("#project-runs-workspace", Vertical).display = False
         self.query_one("#results-workspace", Vertical).display = False
         self.query_one("#qa-workspace", Vertical).display = False
         tabs = self._get_tabs()
@@ -3272,14 +3644,19 @@ class RcaTui(App):
             tabs.display = False
         self.query_one("#result-navigation", Horizontal).display = False
         artifacts = self.query_one("#artifact-workspace", Vertical)
+        project_runs = self.query_one("#project-runs-workspace", Vertical)
         results = self.query_one("#results-workspace", Vertical)
         qa = self.query_one("#qa-workspace", Vertical)
         artifacts.display = workspace == "artifacts"
+        project_runs.display = workspace == "runs"
         results.display = workspace == "results"
         qa.display = workspace == "qa"
         if workspace == "artifacts":
             self._render_artifact_workspace(self._visible_log_files, force=True)
             self._focus_workspace_list("artifact-workspace-list")
+        elif workspace == "runs":
+            self._render_project_runs()
+            self._focus_workspace_list("project-runs-list")
         elif workspace == "results":
             self._render_runs(force_workspace=True)
             self._focus_workspace_list("results-workspace-list")
@@ -3347,6 +3724,7 @@ class RcaTui(App):
         """Mirror the current workspace in the persistent sidebar navigation."""
         buttons = {
             "artifacts": "#nav-artifacts",
+            "runs": "#nav-runs",
             "results": "#nav-results",
             "qa": "#nav-qa",
             "home": "#nav-home",
@@ -3362,10 +3740,10 @@ class RcaTui(App):
             artifacts = f"[bold #f0f6fc]{len(self._visible_log_files)} visible[/bold #f0f6fc]" if self._visible_log_files else "[bold #8f8f8f]none found[/bold #8f8f8f]"
             if self.offline:
                 connection = "[bold #f0f6fc]OFFLINE[/bold #f0f6fc]  Local rule-based analysis; provider not required"
-                next_step = "Select an artifact and press [bold #f0f6fc]a[/bold #f0f6fc] to analyze offline." if self._visible_log_files else "Press [bold #f0f6fc]b[/bold #f0f6fc] to choose a directory containing CI/CD artifacts."
+                next_step = "Select an artifact and press [bold #f0f6fc]a[/bold #f0f6fc] to analyze offline." if self._visible_log_files else "Choose your project root with [bold #f0f6fc]b[/bold #f0f6fc]. Hound scans it recursively for supported artifacts."
             else:
                 connection = f"[bold #f0f6fc]ONLINE[/bold #f0f6fc]  {escape(self.provider or 'not selected')} / {escape(self.model or 'model not selected')}"
-                next_step = "Select an artifact and press [bold #f0f6fc]a[/bold #f0f6fc] to analyze." if self._visible_log_files else "Press [bold #f0f6fc]b[/bold #f0f6fc] to choose a directory containing CI/CD artifacts."
+                next_step = "Select an artifact and press [bold #f0f6fc]a[/bold #f0f6fc] to analyze." if self._visible_log_files else "Choose your project root with [bold #f0f6fc]b[/bold #f0f6fc]. Hound scans it recursively for supported artifacts."
             self.query_one("#home-next", Static).update(
                 "[bold #8f8f8f]NEXT ACTION[/bold #8f8f8f]\n"
                 f"[bold]{next_step}[/bold]"
@@ -3403,11 +3781,12 @@ class RcaTui(App):
             )
             self.query_one("#home-keyboard", Static).update(
                 "[bold #8f8f8f]KEYBOARD SHORTCUTS[/bold #8f8f8f]\n"
-                "[bold #ffffff]a[/bold #ffffff]  analyze         [bold #ffffff]f[/bold #ffffff]  artifacts\n"
-                "[bold #ffffff]A[/bold #ffffff]  batch all       [bold #ffffff]l[/bold #ffffff]  results\n"
-                "[bold #ffffff]x[/bold #ffffff]  stop analyze    [bold #ffffff]y[/bold #ffffff]  quality\n"
-                "[bold #ffffff]b[/bold #ffffff]  browse          [bold #ffffff]s[/bold #ffffff]  settings\n"
-                "[bold #ffffff]r[/bold #ffffff]  refresh         [bold #ffffff]?[/bold #ffffff]  help guide"
+                "[bold #ffffff]a[/bold #ffffff]  analyze       [bold #ffffff]A[/bold #ffffff]  batch all      [bold #ffffff]x[/bold #ffffff]  stop analyze\n"
+                "[bold #ffffff]f[/bold #ffffff]  artifacts     [bold #ffffff]l[/bold #ffffff]  results        [bold #ffffff]y[/bold #ffffff]  quality\n"
+                "[bold #ffffff]j[/bold #ffffff]  project runs  [bold #ffffff]Ctrl+R[/bold #ffffff] run project    [bold #ffffff]b[/bold #ffffff]  browse\n"
+                "[bold #ffffff]r[/bold #ffffff]  refresh       [bold #ffffff]m[/bold #ffffff]  sidebar        [bold #ffffff]s[/bold #ffffff]  settings\n"
+                "[bold #ffffff]?[/bold #ffffff]  help guide    [bold #ffffff]h[/bold #ffffff]  home           [bold #ffffff]q[/bold #ffffff]  "
+                + ("launcher" if self.return_to_launcher else "exit")
             )
             self.query_one("#home-formats", Static).update(
                 "[bold #8f8f8f]SUPPORTED FORMATS[/bold #8f8f8f]    "
@@ -3746,7 +4125,7 @@ class RcaTui(App):
         """Apply the current mirrored filter, not a stale intermediate event value."""
         filter_input = next(iter(self.query("#log-filter")), None)
         if isinstance(filter_input, Input):
-            self._scan_logs(filter_input.value)
+            self._scan_logs(filter_input.value, discover=False)
 
     def on_input_submitted(self, event: Input.Submitted) -> None:
         if event.input.id == "dir-input":
@@ -3769,7 +4148,7 @@ class RcaTui(App):
             elif event.select.id == "workspace-artifact-sort":
                 sync("#log-sort")
             log_filter = next(iter(self.query("#log-filter")), None)
-            self._scan_logs(log_filter.value if log_filter is not None else "")
+            self._scan_logs(log_filter.value if log_filter is not None else "", discover=False)
         elif event.select.id in {"workspace-run-stage", "workspace-run-sort"}:
             self._render_runs()
 
@@ -3778,6 +4157,7 @@ class RcaTui(App):
         self._clear_selected_artifacts()
         self._artifact_page = 1
         self._results_page = 1
+        self._discovered_log_files = None
         self.query_one("#log-filter", Input).value = ""
         self.query_one("#workspace-artifact-filter", Input).value = ""
         qa_source = self.query("#qa-source-path").first(Input)
@@ -3815,7 +4195,7 @@ class RcaTui(App):
         self.query_one("#dir-input", Input).value = selected
         self._load_directory()
 
-    def _scan_logs(self, filter_query: str = "") -> None:
+    def _scan_logs(self, filter_query: str = "", *, discover: bool = True) -> None:
         self._scan_generation += 1
         generation = self._scan_generation
         required_widgets = ("#log-list", "#type-filter", "#log-sort", "#session-summary")
@@ -3831,19 +4211,10 @@ class RcaTui(App):
         self._selected_log = None
         directory_valid = self.logs_dir.is_dir()
         try:
-            all_logs = sorted(
-                (
-                    path
-                    for path in self.logs_dir.iterdir()
-                    if path.is_file()
-                    and not path.is_symlink()
-                    and path.suffix.lower() in service.SUPPORTED_LOG_SUFFIXES
-                    and not service.is_sidecar(path)
-                ),
-                key=lambda path: path.stat().st_mtime,
-                reverse=True,
-            ) if directory_valid else []
-        except OSError:
+            if discover or self._discovered_log_files is None:
+                self._discovered_log_files = service.discover_artifacts(self.logs_dir) if directory_valid else []
+            all_logs = sorted(self._discovered_log_files, key=lambda path: path.stat().st_mtime, reverse=True)
+        except (OSError, service.AnalysisInputError):
             all_logs = []
             directory_valid = False
         query = filter_query.lower().strip()
@@ -3890,7 +4261,7 @@ class RcaTui(App):
         self._visible_log_files = files
         self._render_artifact_workspace(files)
         available_files: list[Path] = []
-        for path in files:
+        for index, path in enumerate(files):
             try:
                 size = path.stat().st_size
             except OSError:
@@ -3899,10 +4270,15 @@ class RcaTui(App):
             self._log_files.append(path)
             size_text = f"{size / 1024 / 1024:.1f}M" if size >= 1024 * 1024 else f"{size / 1024:.0f}K" if size >= 1024 else f"{size}B"
             stage, kind = self._log_info.get(path, ("unknown", "pending"))
+            if index < PAGE_SIZE:
+                list_view.append(ListItem(Static(
+                    f"{escape(self._artifact_display_path(path))}  {escape(stage.upper())}\n"
+                    f"{size_text}  {_fmt_age(path)}  {escape(kind)}  •  {escape(_artifact_role(path))}"
+                )))
+        if len(available_files) > PAGE_SIZE:
             list_view.append(ListItem(Static(
-                f"{escape(path.name)}  {escape(stage.upper())}\n"
-                f"{size_text}  {_fmt_age(path)}  {escape(kind)}  •  {escape(_artifact_role(path))}"
-            )))
+                f"{len(available_files) - PAGE_SIZE} more artifacts are available in the Artifacts workspace."
+            ), disabled=True))
         if available_files:
             list_view.index = 0
             self._selected_log = available_files[0]
@@ -3912,8 +4288,10 @@ class RcaTui(App):
             list_view.append(ListItem(Static("No logs match filter. Clear filter or try another name."), disabled=True))
             self._set_state("empty", "No matching logs; clear filter")
         elif directory_valid:
-            list_view.append(ListItem(Static("No supported artifacts (.log/.xml/.sarif/.json). Add CI/CD artifacts or load another directory."), disabled=True))
-            self._set_state("empty", "No supported artifacts; add .log/.xml/.sarif/.json")
+            list_view.append(ListItem(Static(
+                "No supported artifacts found in this project. Run a test or build with `hound log --analyze -- <command>`, then reload."
+            ), disabled=True))
+            self._set_state("empty", "No supported artifacts found; capture a test or build, then reload")
         else:
             list_view.append(ListItem(Static("Directory unavailable. Check path and press Enter."), disabled=True))
             self._set_state("error", "Invalid log directory")
@@ -3922,6 +4300,13 @@ class RcaTui(App):
         pending = [path for path in all_logs if path not in self._log_info]
         if pending:
             self._classify_logs_background(pending, generation)
+
+    def _artifact_display_path(self, path: Path) -> str:
+        """Show repository-relative paths so nested artifacts remain identifiable."""
+        try:
+            return str(path.relative_to(self.logs_dir))
+        except ValueError:
+            return path.name
 
     def _render_artifact_workspace(self, files: list[Path], *, force: bool = False) -> None:
         total_items = len(files)
@@ -3975,7 +4360,7 @@ class RcaTui(App):
     def _artifact_workspace_label(self, path: Path) -> str:
         stage, kind = self._log_info.get(path, ("unknown", "pending"))
         check = "[✓]" if path in self._selected_artifacts else "[ ]"
-        return f"{check} {escape(path.name)}  {escape(stage)} / {escape(kind)}  •  {escape(_artifact_role(path))}"
+        return f"{check} {escape(self._artifact_display_path(path))}  {escape(stage)} / {escape(kind)}  •  {escape(_artifact_role(path))}"
 
     def _set_selected_artifacts(self, paths: list[Path]) -> None:
         self._selected_artifact_order = list(dict.fromkeys(paths))
@@ -4966,6 +5351,8 @@ class RcaTui(App):
         elif list_view.id == "results-workspace-list":
             if not isinstance(list_view, ResultsListView) or not list_view.consume_mouse_click(event.item):
                 self.action_open_selected_result()
+        elif list_view.id == "project-runs-list":
+            self._select_project_run(index)
         elif list_view.id == "qa-history-list" and index < len(self._qa_history_tests):
             self._load_qa_stats(self._qa_history_tests[index])
 
@@ -4974,6 +5361,8 @@ class RcaTui(App):
             self.action_back()
         elif event.button.id == "open-settings":
             self.action_open_settings()
+        elif event.button.id == "exit-tui":
+            self.action_exit_tui()
         elif event.button.id == "browse-dir":
             self.action_browse_directory()
         elif event.button.id == "load-dir":
@@ -5006,6 +5395,12 @@ class RcaTui(App):
             self.action_analyze()
         elif event.button.id == "workspace-browse":
             self.action_browse_directory()
+        elif event.button.id == "project-runs-start":
+            self.action_run_project()
+        elif event.button.id == "project-runs-rerun":
+            self.action_rerun_project()
+        elif event.button.id == "project-runs-artifacts":
+            self.action_show_run_artifacts()
         elif event.button.id in {"workspace-refresh", "workspace-reload"}:
             self._load_directory()
         elif event.button.id == "workspace-analyze-all":
@@ -5024,6 +5419,8 @@ class RcaTui(App):
             self.action_toggle_sidebar()
         elif event.button.id == "nav-artifacts":
             self._show_workspace("artifacts")
+        elif event.button.id == "nav-runs":
+            self._show_workspace("runs")
         elif event.button.id == "nav-results":
             self._show_workspace("results")
         elif event.button.id == "nav-qa":
@@ -5080,6 +5477,9 @@ class RcaTui(App):
 
     def action_show_artifacts(self) -> None:
         self._show_workspace("artifacts")
+
+    def action_show_project_runs(self) -> None:
+        self._show_workspace("runs")
 
     def action_show_results(self) -> None:
         self._show_workspace("results")
@@ -5260,6 +5660,12 @@ class RcaTui(App):
         )
         self.call_after_refresh(self._update_home_logo)
 
+    def action_exit_tui(self) -> None:
+        self.exit(result="launcher" if self.return_to_launcher else "shell")
+
+    def action_quit(self) -> None:
+        self.exit(result="shell")
+
     def action_open_settings(self) -> None:
         self.push_screen(SettingsScreen(self))
 
@@ -5290,6 +5696,9 @@ class RcaTui(App):
             self._refresh_results_selection()
 
     def action_stop_or_clear_selected(self) -> None:
+        if self._running_project:
+            self.action_stop_project()
+            return
         if self._analyzing:
             self.action_stop_analysis()
             return
@@ -5400,10 +5809,12 @@ class RcaTui(App):
 
     def action_copy_report(self) -> None:
         tabs = self._get_tabs()
-        if tabs is not None and tabs.display and tabs.active == "pane-context":
-            self.action_copy_validation_summary()
+        if tabs is None or not tabs.display:
             return
-        self._copy_markdown("#report", "report")
+        if tabs.active == "pane-report":
+            self._copy_markdown("#report", "report")
+        elif tabs.active == "pane-ticket":
+            self._copy_markdown("#ticket", "ticket")
 
     def copy_to_clipboard(self, text: str) -> None:
         self._clipboard = text
@@ -5433,9 +5844,172 @@ class RcaTui(App):
             self.notify("Directory reloaded", timeout=2)
             return
         query = self.query_one("#log-filter", Input).value
+        self._discovered_log_files = None
         self._scan_logs(query)
         self._scan_runs()
         self.notify("Logs and runs refreshed", timeout=2)
+
+    def action_run_project(self) -> None:
+        if self._running_project:
+            self.notify("A project command is already running", severity="warning")
+            return
+        if not self.logs_dir.is_dir():
+            self.notify("Choose a valid project directory first", severity="error")
+            return
+        self.push_screen(RunProjectScreen(self))
+
+    def action_stop_project(self) -> None:
+        if not self._running_project or self._project_cancel_requested.is_set():
+            return
+        self._project_cancel_requested.set()
+        self._set_state("loading", "Stopping project process tree")
+        self.notify("Project stop requested", timeout=3)
+
+    def action_rerun_project(self) -> None:
+        if not self._selected_project_run:
+            return
+        command = self._selected_project_run.get("command")
+        if isinstance(command, list) and all(isinstance(item, str) for item in command):
+            cwd = Path(str(self._selected_project_run.get("cwd", self.logs_dir))).expanduser()
+            self.start_project_run(command, cwd=cwd)
+
+    def action_show_run_artifacts(self) -> None:
+        if not self._selected_project_run:
+            return
+        artifacts = [Path(path) for path in self._selected_project_run.get("artifacts", [])]
+        self._show_workspace("artifacts")
+        available = [path for path in artifacts if path in self._visible_log_files]
+        self._set_selected_artifacts(available)
+        self._render_artifact_workspace(self._visible_log_files, force=True)
+
+    def _project_runs_directory(self) -> Path:
+        root = self.logs_dir if self.logs_dir.name == ".hound" else self.logs_dir / ".hound"
+        return root / "runs"
+
+    def _artifact_signatures(self) -> dict[Path, tuple[int, int]]:
+        return service.artifact_signatures(self.logs_dir)
+
+    def _scan_project_runs(self) -> None:
+        directory = self._project_runs_directory()
+        self._project_runs, errors = service.load_project_runs(directory)
+        if errors and self.is_mounted:
+            self.notify(f"Skipped {len(errors)} damaged project run record(s)", severity="warning", timeout=6)
+        if self._selected_project_run:
+            selected_id = self._selected_project_run.get("run_id")
+            self._selected_project_run = next(
+                (item for item in self._project_runs if item.get("run_id") == selected_id),
+                None,
+            )
+        self._render_project_runs()
+
+    def _render_project_runs(self) -> None:
+        if not self.is_mounted:
+            return
+        try:
+            list_view = self.query_one("#project-runs-list", ListView)
+            list_view.clear()
+            for record in self._project_runs:
+                command = " ".join(str(item) for item in record.get("command", []))
+                status = str(record.get("status", "unknown")).upper()
+                duration = int(record.get("duration_ms", 0)) / 1000
+                count = len(record.get("artifacts", []))
+                list_view.append(ListItem(Static(
+                    f"{escape(status)}  {escape(_compact(command, 72))}\n"
+                    f"   exit {record.get('exit_code', '?')} · {duration:.1f}s · {count} changed artifacts"
+                )))
+            if not self._project_runs:
+                list_view.append(ListItem(Static("No project runs yet. Choose Run project to create one."), disabled=True))
+            self.query_one("#project-runs-meta", Static).update(
+                f"{len(self._project_runs)} recorded  •  {escape(str(self._project_runs_directory()))}"
+            )
+            self._render_project_run_detail()
+        except Exception as exc:
+            self.log.error("project run rendering failed", exc_info=exc)
+            self.notify("Project run view could not be refreshed", severity="error", timeout=6)
+
+    def _select_project_run(self, index: int) -> None:
+        if 0 <= index < len(self._project_runs):
+            self._selected_project_run = self._project_runs[index]
+            self._render_project_run_detail()
+
+    def _render_project_run_detail(self) -> None:
+        record = self._selected_project_run
+        rerun = self.query_one("#project-runs-rerun", Button)
+        artifacts_button = self.query_one("#project-runs-artifacts", Button)
+        rerun.disabled = record is None or self._running_project
+        artifacts_button.disabled = record is None or not record.get("artifacts")
+        if record is None:
+            self.query_one("#project-run-detail", Static).update(
+                "No project run selected. Run a command to capture its output and generated artifacts."
+            )
+            return
+        command = " ".join(str(item) for item in record.get("command", []))
+        artifacts = record.get("artifacts", [])
+        artifact_lines = "\n".join(f"  {escape(str(path))}" for path in artifacts[:5]) or "  none"
+        if len(artifacts) > 5:
+            artifact_lines += f"\n  … and {len(artifacts) - 5} more"
+        self.query_one("#project-run-detail", Static).update(
+            f"[bold]{escape(command)}[/bold]\n"
+            f"Status: {escape(str(record.get('status', 'unknown')))} · exit {record.get('exit_code', '?')} · "
+            f"{int(record.get('duration_ms', 0)) / 1000:.1f}s\n"
+            f"Capture: {escape(str(record.get('capture', 'unavailable')))}\n"
+            f"Artifacts created or changed during this run:\n{artifact_lines}"
+        )
+
+    def _capture_directory(self, directory: Path | None = None) -> Path:
+        root = directory or self.logs_dir
+        if root.name == ".hound":
+            return root / "captures"
+        return root / ".hound" / "captures"
+
+    def start_project_run(self, command: list[str], *, cwd: Path | None = None) -> None:
+        directory = (cwd or self.logs_dir).resolve()
+        if cwd is not None:
+            self.logs_dir = directory
+            directory_input = self.query("#dir-input").first(Input)
+            if directory_input is not None:
+                directory_input.value = str(self.logs_dir)
+        try:
+            self._active_project_request = service.prepare_project_run(command, directory)
+        except ValueError as exc:
+            self.notify(f"Project command rejected: {exc}", severity="error", timeout=8)
+            return
+        self._project_cancel_requested.clear()
+        self._running_project = True
+        self._set_state("loading", f"Running: {command[0]}")
+        self.run_project(self._active_project_request)
+
+    @work(thread=True, exclusive=True, group="run-project", exit_on_error=False)
+    def run_project(self, request: service.ProjectRunRequest) -> None:
+        try:
+            result = service.execute_project_run(request, cancel_event=self._project_cancel_requested)
+        except (CollectionInputError, OSError, ValueError) as exc:
+            self.call_from_thread(self._finish_project_run, None, str(exc))
+            return
+        self.call_from_thread(self._finish_project_run, result, result.error)
+
+    def _finish_project_run(self, result: service.ProjectRunResult | None, error: str | None) -> None:
+        self._running_project = False
+        self._active_project_request = None
+        if result is not None:
+            self._selected_project_run = result.record
+        self._discovered_log_files = None
+        self._scan_logs()
+        self._scan_project_runs()
+        self._scan_runs()
+        if result is None:
+            self._set_state("error", "Project command could not start")
+            self.notify(f"Project command failed: {error}", severity="error", timeout=8)
+            return
+        collected = result.collected
+        exit_code = collected.exit_code
+        detail = f"exit {exit_code} · captured {collected.log_file.name}"
+        self._set_state("success" if exit_code == 0 else "error", detail)
+        severity = "information" if exit_code == 0 else "warning"
+        message = f"Project command finished ({detail}); artifacts reloaded"
+        if error:
+            message = f"{message}: {error}"
+        self.notify(message, severity=severity, timeout=8)
 
     def _open_workspace_result(self, *, use_selection: bool = False) -> None:
         list_view = self.query_one("#results-workspace-list", ListView)
@@ -5502,6 +6076,12 @@ class RcaTui(App):
         self.notify(f"{cleared} result(s) cleared" + (f"; {failed} failed" if failed else ""), severity=severity)
 
     def action_select_log(self) -> None:
+        project_runs_ws = self.query("#project-runs-workspace").first(Vertical)
+        if project_runs_ws is not None and project_runs_ws.display:
+            list_view = self.query_one("#project-runs-list", ListView)
+            self._select_project_run(list_view.index if list_view.index is not None else 0)
+            return
+
         # If in results workspace, open selected result
         results_ws = self.query("#results-workspace").first(Vertical)
         if results_ws is not None and results_ws.display:
@@ -5620,7 +6200,6 @@ class RcaTui(App):
     async def _analyze(self, path: Path, request: dict) -> None:
         analyze_button = self.query("#analyze").first(Button)
         try:
-            self._show_results()
             self._progress = 0
             started = time.perf_counter()
             if analyze_button is not None:
@@ -5752,7 +6331,6 @@ class RcaTui(App):
             self.notify(f"Invalid analysis settings: {exc}", severity="error")
             return
         self._analysis_config = batch_config
-        self._show_workspace("results")
         self._stop_requested.clear()
         self._analyzing = True
         self._current_doc = None
@@ -6459,3 +7037,83 @@ def clear_managed_results(output_root: Path, run_dirs: list[Path]) -> tuple[int,
         except (OSError, ValueError):
             failed += 1
     return cleared, failed
+# Manifest discovery offers convenience suggestions, not a safety judgment.
+# Package hooks, plugins, and build scripts remain checkout-controlled code.
+_UNSAFE_COMMAND_TERMS = {
+    "clean", "deploy", "destroy", "drop", "migrate", "migration", "prod",
+    "production", "publish", "release", "remove", "reset", "rm", "rollback",
+}
+_SAFE_PACKAGE_SCRIPTS = {"build", "check", "lint", "test", "typecheck", "type-check", "verify"}
+_MAX_MANIFEST_BYTES = 2 * 1024 * 1024
+
+
+def _command_is_suggestible(parts: list[str]) -> bool:
+    words = {word.lower() for part in parts for word in re.findall(r"[A-Za-z0-9_-]+", part)}
+    return not bool(words & _UNSAFE_COMMAND_TERMS)
+
+
+def _discover_project_commands(root: Path) -> list[tuple[str, list[str]]]:
+    """Return bounded command suggestions from project manifests."""
+    suggestions: list[tuple[str, list[str]]] = []
+
+    def add(label: str, command: list[str]) -> None:
+        if _command_is_suggestible(command) and command not in [item[1] for item in suggestions]:
+            suggestions.append((label, command))
+
+    package = root / "package.json"
+    if package.is_file() and not package.is_symlink():
+        try:
+            data = _json.loads(read_bounded_text(package, _MAX_MANIFEST_BYTES, encoding="utf-8"))
+            scripts = data.get("scripts", {}) if isinstance(data, dict) else {}
+            if isinstance(scripts, dict):
+                runner = "npm.cmd" if os.name == "nt" else "npm"
+                for name, body in scripts.items():
+                    if (
+                        isinstance(name, str)
+                        and isinstance(body, str)
+                        and name.lower() in _SAFE_PACKAGE_SCRIPTS
+                        and _command_is_suggestible([body])
+                    ):
+                        add(f"npm {name}", [runner, "run", name])
+        except (OSError, ValueError):
+            pass
+
+    pyproject = root / "pyproject.toml"
+    if pyproject.is_file() and not pyproject.is_symlink():
+        try:
+            text = read_bounded_text(pyproject, _MAX_MANIFEST_BYTES, encoding="utf-8").lower()
+            if "pytest" in text:
+                add("pytest", ["pytest", "-q"])
+        except (OSError, ValueError):
+            pass
+
+    if (root / "Cargo.toml").is_file():
+        add("cargo test", ["cargo", "test"])
+        add("cargo build", ["cargo", "build"])
+    if (root / "go.mod").is_file():
+        add("go test", ["go", "test", "./..."])
+    if (root / "pom.xml").is_file():
+        add("mvn test", ["mvn.cmd" if os.name == "nt" else "mvn", "test"])
+        add("mvn package", ["mvn.cmd" if os.name == "nt" else "mvn", "package"])
+    if (root / "gradlew").is_file() or (root / "gradlew.bat").is_file():
+        wrapper = "gradlew.bat" if os.name == "nt" else "./gradlew"
+        add("gradle test", [wrapper, "test"])
+        add("gradle build", [wrapper, "build"])
+
+    makefile = root / "Makefile"
+    if makefile.is_file() and not makefile.is_symlink():
+        try:
+            text = read_bounded_text(makefile, _MAX_MANIFEST_BYTES, encoding="utf-8")
+            targets = {
+                match.group(1)
+                for line in text.splitlines()
+                if (match := re.match(r"^([A-Za-z0-9_.-]+)\s*:(?![=])", line))
+            }
+            for target in sorted(targets & _SAFE_PACKAGE_SCRIPTS):
+                add(f"make {target}", ["make", target])
+        except (OSError, ValueError):
+            pass
+    return suggestions[:6]
+
+
+RcaTui = HoundTui

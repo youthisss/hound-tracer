@@ -7,6 +7,37 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-09-17
+
+### Added
+- An interactive launcher for choosing the terminal UI, persistent command line,
+  or local HTTP API when `hound` runs without a subcommand.
+- A persistent Rich command session with completion, history, status, and help.
+- Project workspaces under `.hound` for captured logs, discovered artifacts,
+  project-run records, analysis results, and local state.
+- TUI project command execution with explicit confirmation, a five-minute default
+  timeout, process-tree cancellation, redacted bounded capture, and run history.
+- Recursive artifact discovery for logs, JUnit XML, SARIF, and supported JSON test
+  reports while excluding dependency, cache, generated-result, state, and symlinked paths.
+- Explicit-risk subscription authentication adapters for the official Codex, Claude,
+  and Gemini CLIs, plus custom OpenAI-compatible and Anthropic-compatible providers.
+
+### Changed
+- Bare `hound` now opens the interface launcher instead of starting the TUI directly.
+- `hound init` now creates an idempotent project configuration and `.hound` workspace.
+- `hound analyze` and `hound log` use initialized workspace paths by default.
+- Human-facing TTY output now uses shared Rich panels and tables while JSON and
+  redirected text output retain machine-readable formats.
+- The TUI class is named `HoundTui`; `RcaTui` remains available as a compatibility alias.
+- The MCP server identity and version output now use the `hound-tracer` and
+  `Hound Tracer` product names.
+
+### Security
+- Project commands run without a shell and use bounded capture, argument and output
+  redaction, timeout enforcement, process-tree cancellation, and non-symlink state paths.
+- Project command execution remains unsandboxed and retains the Hound process permissions;
+  the threat model now documents this boundary.
+
 ## [0.5.2] - 2026-09-12
 
 ### Added

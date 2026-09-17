@@ -40,7 +40,7 @@ def test_mcp_cli_stdio_lifecycle(tmp_path):
     init_line = proc.stdout.readline()
     init_resp = json.loads(init_line)
     assert init_resp["id"] == 1
-    assert init_resp["result"]["serverInfo"]["name"] == "hound-mcp"
+    assert init_resp["result"]["serverInfo"]["name"] == "hound-tracer"
 
     # 2. notification initialized
     notif_msg = json.dumps({

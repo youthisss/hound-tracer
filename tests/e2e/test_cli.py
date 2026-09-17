@@ -75,7 +75,7 @@ def test_cli_version(capsys):
     with pytest.raises(SystemExit) as exc:
         main(["--version"])
     assert exc.value.code == 0
-    assert "Hound" in capsys.readouterr().out
+    assert "Hound Tracer" in capsys.readouterr().out
 
 
 def test_analyze_handles_single_file_positional_or_flag(tmp_path):

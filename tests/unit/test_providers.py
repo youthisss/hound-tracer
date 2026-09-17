@@ -11,6 +11,46 @@ def test_custom_provider_registry_roundtrip(tmp_path):
     assert load_custom_providers(path) == {}
 
 
+def test_anthropic_compatible_provider_roundtrip(tmp_path):
+    from hound.providers import load_custom_providers, save_custom_provider
+
+    path = tmp_path / "providers.yml"
+    save_custom_provider("claude-gateway", {
+        "name": "Claude Gateway",
+        "base_url": "https://claude.example/v1",
+        "default_model": "claude-sonnet",
+        "protocol": "anthropic",
+    }, path)
+    provider = load_custom_providers(path)["claude-gateway"]
+    assert provider["protocol"] == "anthropic"
+    assert provider["supports_model_discovery"] is False
+
+
+def test_anthropic_compatible_check_uses_native_messages_endpoint(monkeypatch):
+    from hound.providers import check_anthropic_compatible
+
+    captured = {}
+
+    class Response:
+        status = 200
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+    def open_request(request, timeout):
+        captured.update(url=request.full_url, headers=dict(request.headers), body=json.loads(request.data), timeout=timeout)
+        return Response()
+
+    monkeypatch.setattr("hound.providers.urlopen", open_request)
+    check_anthropic_compatible("https://claude.example/v1", "secret", "claude-sonnet")
+    assert captured["url"] == "https://claude.example/v1/messages"
+    assert captured["body"]["model"] == "claude-sonnet"
+    assert captured["headers"]["X-api-key"] == "secret"
+
+
 def test_provider_rejects_insecure_remote_url(tmp_path):
     import pytest
     from hound.providers import save_custom_provider

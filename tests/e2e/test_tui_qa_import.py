@@ -11,11 +11,11 @@ FIXTURES = __import__("pathlib").Path(__file__).resolve().parents[1] / "fixtures
 def test_tui_imports_qa_artifacts_into_history_with_retention(tmp_path) -> None:
     shutil.copy(FIXTURES / "junit_flaky.xml", tmp_path / "junit_flaky.xml")
 
-    from hound.tui import RcaTui
+    from hound.tui import HoundTui
     from textual.widgets import Button, Input, Static
 
     output = tmp_path / "out"
-    app = RcaTui(logs_dir=str(tmp_path), out_dir=str(output), offline=True)
+    app = HoundTui(logs_dir=str(tmp_path), out_dir=str(output), offline=True)
 
     async def main() -> None:
         async with app.run_test() as pilot:
@@ -42,10 +42,10 @@ def test_tui_imports_qa_artifacts_into_history_with_retention(tmp_path) -> None:
 
 
 def test_tui_qa_form_rejects_invalid_retention_days(tmp_path) -> None:
-    from hound.tui import RcaTui
+    from hound.tui import HoundTui
     from textual.widgets import Input
 
-    app = RcaTui(logs_dir=str(tmp_path), out_dir=str(tmp_path / "out"), offline=True)
+    app = HoundTui(logs_dir=str(tmp_path), out_dir=str(tmp_path / "out"), offline=True)
 
     async def main() -> None:
         async with app.run_test() as pilot:

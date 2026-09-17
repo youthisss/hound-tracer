@@ -1,7 +1,7 @@
 ---
 name: hound-tracer
 description: Offline-first diagnostic, RCA (Root Cause Analysis), and quality gate agent for CI/CD, build, test, and container failures.
-version: 0.5.2
+version: 0.6.0
 license: MIT
 slash: true
 metadata:

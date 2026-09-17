@@ -1,0 +1,11 @@
+llm:
+  provider: openai
+  model: auto
+trust:
+  source_class: local_artifact
+redact: true
+components:
+  calculator: src/calculator.py
+dedup:
+  backend: sqlite
+  state_file: .hound/state/incidents.sqlite3

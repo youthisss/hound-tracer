@@ -1,0 +1,9 @@
+version: "1.0"
+rules:
+  new_failure: block
+  flaky: warn
+  sarif_warning: warn
+  sarif_error: block
+  changed_line_coverage:
+    minimum: 0.80
+    outcome: block
