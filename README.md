@@ -818,8 +818,6 @@ src/hound/
 | [`docs/operations/state-recovery.md`](docs/operations/state-recovery.md) | Persistent state recovery |
 | [`docs/operations/operations-metrics.md`](docs/operations/operations-metrics.md) | Operational metrics |
 | [`docs/operations/operational-correlation.md`](docs/operations/operational-correlation.md) | Cross-signal correlation |
-| [`docs/operations/pilot-readiness.md`](docs/operations/pilot-readiness.md) | Pilot acceptance and evidence |
-| [`docs/operations/release-checklist.md`](docs/operations/release-checklist.md) | Release and publication gates |
 | [`docs/benchmarks/limits.md`](docs/benchmarks/limits.md) | Resource bounds and benchmark evidence |
 | [`CHANGELOG.md`](CHANGELOG.md) | Release history and migrations |
 | [`SECURITY.md`](SECURITY.md) | Supported versions and private disclosure |

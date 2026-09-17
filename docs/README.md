@@ -32,9 +32,6 @@ contracts that are too detailed for the root README.
 - [Operations metrics](operations/operations-metrics.md)
 - [Server state recovery](operations/state-recovery.md)
 - [Threat model](operations/threat-model.md)
-- [Pilot readiness](operations/pilot-readiness.md)
-- [Release checklist](operations/release-checklist.md)
-- [Pilot evidence template](operations/pilot-evidence-template.md)
 
 ## Additional Material
 
