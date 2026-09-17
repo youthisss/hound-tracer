@@ -7,6 +7,7 @@ import os
 import re
 import shutil
 import sqlite3
+import subprocess
 import sys
 from collections.abc import Sequence
 from dataclasses import asdict, replace
@@ -518,6 +519,20 @@ def build_parser() -> argparse.ArgumentParser:
     integrations_install.add_argument("--dry-run", action="store_true", help="show files without writing them")
     integrations_install.add_argument("--yes", action="store_true", help="skip the confirmation prompt")
     integrations_install.add_argument("--json", action="store_true", help="output JSON")
+    integrations_uninstall = integrations_sub.add_parser("uninstall", help="remove Hound-owned harness integrations")
+    integrations_uninstall.add_argument("harnesses", nargs="*", metavar="HARNESS")
+    integrations_uninstall.add_argument("--detect", action="store_true", help="target every detected harness")
+    integrations_uninstall.add_argument("--scope", choices=("global", "project"), default="global")
+    integrations_uninstall.add_argument("--dry-run", action="store_true", help="show removals without changing files")
+    integrations_uninstall.add_argument("--yes", action="store_true", help="skip the confirmation prompt")
+    integrations_uninstall.add_argument("--json", action="store_true", help="output JSON")
+    uninstall_cmd = sub.add_parser("uninstall", help="remove Hound Tracer from this environment")
+    uninstall_cmd.add_argument("--package-manager", choices=("auto", "uv", "pipx", "pip"), default="auto")
+    uninstall_cmd.add_argument("--remove-integrations", action="store_true", help="remove all detected global harness integrations first")
+    uninstall_cmd.add_argument("--purge-project", action="store_true", help="remove .hound and .hound.yml/.hound.yaml from the current project")
+    uninstall_cmd.add_argument("--purge-user-data", action="store_true", help="remove Hound user configuration and model cache")
+    uninstall_cmd.add_argument("--dry-run", action="store_true", help="show actions without changing files")
+    uninstall_cmd.add_argument("--yes", action="store_true", help="confirm package removal and requested data deletion")
     sub.add_parser(
         "mcp",
         help="run the Model Context Protocol (stdio) service for AI coding agents",
@@ -2142,7 +2157,7 @@ def run_mcp(args: argparse.Namespace) -> int:
 
 
 def run_integrations(args: argparse.Namespace) -> int:
-    from hound.integrations import detect_harnesses, install_integrations, print_results
+    from hound.integrations import detect_harnesses, install_integrations, print_results, uninstall_integrations
 
     detected = detect_harnesses()
     if args.integrations_command == "detect":
@@ -2166,12 +2181,86 @@ def run_integrations(args: argparse.Namespace) -> int:
         if not (sys.stdin.isatty() and sys.stdout.isatty()):
             print("error: confirmation requires a TTY; pass --yes or --dry-run", file=sys.stderr)
             return 2
-        print("Hound will install skills and merge available MCP configuration for: " + ", ".join(harnesses))
+        action = "remove Hound-owned integrations from" if args.integrations_command == "uninstall" else "install skills and merge available MCP configuration for"
+        print(f"Hound will {action}: " + ", ".join(harnesses))
         if input("Continue? [y/N] ").strip().lower() not in {"y", "yes"}:
             print("No changes made.")
             return 0
-    results = install_integrations(harnesses, scope=args.scope, root=Path.cwd(), dry_run=args.dry_run)
-    return print_results(results, as_json=args.json, dry_run=args.dry_run)
+    operation = uninstall_integrations if args.integrations_command == "uninstall" else install_integrations
+    results = operation(harnesses, scope=args.scope, root=Path.cwd(), dry_run=args.dry_run)
+    return print_results(
+        results,
+        as_json=args.json,
+        dry_run=args.dry_run,
+        action=args.integrations_command,
+    )
+
+
+def _uninstall_package_command(manager: str) -> list[str]:
+    if manager == "auto":
+        executable = str(Path(sys.executable).resolve()).lower().replace("\\", "/")
+        if "/uv/tools/" in executable and shutil.which("uv"):
+            manager = "uv"
+        elif "/pipx/venvs/" in executable and shutil.which("pipx"):
+            manager = "pipx"
+        else:
+            manager = "pip"
+    if manager == "uv":
+        return ["uv", "tool", "uninstall", "hound-tracer"]
+    if manager == "pipx":
+        return ["pipx", "uninstall", "hound-tracer"]
+    return [sys.executable, "-m", "pip", "uninstall", "--yes", "hound-tracer"]
+
+
+def run_uninstall(args: argparse.Namespace) -> int:
+    from platformdirs import user_cache_path, user_config_path
+
+    package_command = _uninstall_package_command(args.package_manager)
+    project_paths = [Path.cwd() / WORKSPACE_DIR, *(Path.cwd() / name for name in CONFIG_FILENAMES)] if args.purge_project else []
+    user_paths = [
+        Path(user_config_path("hound")),
+        Path(user_config_path("hound-tracer")),
+        Path(user_cache_path("hound")),
+    ] if args.purge_user_data else []
+    if args.dry_run:
+        if args.remove_integrations:
+            print("would remove detected global harness integrations")
+        for path in project_paths + user_paths:
+            if path.exists() or path.is_symlink():
+                print(f"would remove {path}")
+        print("would run: " + " ".join(package_command))
+        return 0
+    if not args.yes:
+        if not (sys.stdin.isatty() and sys.stdout.isatty()):
+            print("error: confirmation requires a TTY; pass --yes or --dry-run", file=sys.stderr)
+            return 2
+        print("Hound Tracer will be removed from the current Python environment.")
+        if args.purge_project or args.purge_user_data:
+            print("Requested Hound configuration and data will also be deleted.")
+        if input("Continue? [y/N] ").strip().lower() not in {"y", "yes"}:
+            print("No changes made.")
+            return 0
+    if args.remove_integrations:
+        from hound.integrations import SUPPORTED_HARNESSES, uninstall_integrations, print_results
+
+        results = uninstall_integrations(list(SUPPORTED_HARNESSES), scope="global", root=Path.cwd())
+        if print_results(results, action="uninstall") != 0:
+            return 3
+    for path in project_paths + user_paths:
+        try:
+            if path.is_dir() and not path.is_symlink():
+                shutil.rmtree(path)
+            elif path.exists() or path.is_symlink():
+                path.unlink()
+        except OSError as exc:
+            print(f"error: could not remove {path}: {exc}", file=sys.stderr)
+            return 3
+    try:
+        completed = subprocess.run(package_command, check=False)
+    except OSError as exc:
+        print(f"error: could not run package manager: {exc}", file=sys.stderr)
+        return 3
+    return completed.returncode
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -2251,6 +2340,8 @@ def _dispatch(args: argparse.Namespace, parser: argparse.ArgumentParser) -> int:
         return run_mcp(args)
     if args.command == "integrations":
         return run_integrations(args)
+    if args.command == "uninstall":
+        return run_uninstall(args)
     parser.print_help()
     return 2
 

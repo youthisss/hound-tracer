@@ -98,3 +98,60 @@ def test_all_harnesses_receive_mcp_configuration(tmp_path, monkeypatch):
     antigravity = home / ".gemini" / "antigravity" / "mcp_config.json"
     assert json.loads(antigravity.read_text(encoding="utf-8"))["mcpServers"]["hound"]["command"] == "hound-mcp"
     assert (home / ".claude" / "plugins" / "hound" / "plugin.json").is_file()
+
+
+def test_uninstall_integrations_preserves_unrelated_configuration(tmp_path, monkeypatch):
+    home = _use_home(monkeypatch, tmp_path)
+    integrations.install_integrations(["opencode", "claude", "codex", "hermes"], scope="global", root=tmp_path)
+
+    opencode = home / ".config" / "opencode" / "opencode.jsonc"
+    payload = json.loads(opencode.read_text(encoding="utf-8"))
+    payload["model"] = "example/model"
+    payload["mcp"]["servers"]["other"] = {"type": "remote", "url": "https://example.test"}
+    opencode.write_text(json.dumps(payload), encoding="utf-8")
+
+    results = integrations.uninstall_integrations(
+        ["opencode", "claude", "codex", "hermes"], scope="global", root=tmp_path
+    )
+
+    assert all(result.installed for result in results)
+    remaining = json.loads(opencode.read_text(encoding="utf-8"))
+    assert remaining["model"] == "example/model"
+    assert set(remaining["mcp"]["servers"]) == {"other"}
+    assert "hound-analyze" not in remaining["commands"]
+    assert not (home / ".config" / "opencode" / "skills" / "hound-tracer").exists()
+    assert "hound" not in json.loads((home / ".claude.json").read_text(encoding="utf-8"))["mcpServers"]
+    assert "[mcp_servers.hound]" not in (home / ".codex" / "config.toml").read_text(encoding="utf-8")
+    assert "hound" not in yaml.safe_load((home / ".hermes" / "config.yaml").read_text(encoding="utf-8"))["mcp_servers"]
+
+
+def test_integrations_uninstall_dry_run_keeps_files(tmp_path, monkeypatch):
+    home = _use_home(monkeypatch, tmp_path)
+    integrations.install_integrations(["opencode"], scope="global", root=tmp_path)
+
+    results = integrations.uninstall_integrations(["opencode"], scope="global", root=tmp_path, dry_run=True)
+
+    assert results[0].changed
+    assert (home / ".config" / "opencode" / "skills" / "hound-tracer").exists()
+    assert "hound" in json.loads((home / ".config" / "opencode" / "opencode.jsonc").read_text(encoding="utf-8"))["mcp"]["servers"]
+
+
+def test_uninstall_cli_dry_run_does_not_invoke_package_manager(tmp_path, monkeypatch, capsys):
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / ".hound").mkdir()
+    (tmp_path / ".hound.yml").write_text("redact: true\n", encoding="utf-8")
+    monkeypatch.setattr("subprocess.run", lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("must not run")))
+
+    assert main(["uninstall", "--package-manager", "pipx", "--purge-project", "--dry-run"]) == 0
+    output = capsys.readouterr().out
+    assert "would remove" in output
+    assert "pipx uninstall hound-tracer" in output
+    assert (tmp_path / ".hound").exists()
+
+
+def test_uninstall_cli_runs_selected_package_manager(monkeypatch):
+    calls = []
+    monkeypatch.setattr("subprocess.run", lambda command, check: calls.append((command, check)) or type("Result", (), {"returncode": 0})())
+
+    assert main(["uninstall", "--package-manager", "uv", "--yes"]) == 0
+    assert calls == [(["uv", "tool", "uninstall", "hound-tracer"], False)]

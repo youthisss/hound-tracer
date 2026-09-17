@@ -388,6 +388,7 @@ Set `HOUND_MCP_ROOTS` to the allowed filesystem roots. Command execution is disa
 | `hound delivery` | Inspect and recover delivery-ledger records |
 | `hound incidents` | Inspect recurrence or invalidate cached RCA snapshots |
 | `hound integrations` | Detect harnesses and install confirmed integrations |
+| `hound uninstall` | Remove the package and optionally purge integrations or local data |
 | `hound mcp` | Start the stdio MCP service |
 | `hound clean` | Remove only output trees carrying Hound ownership markers |
 
@@ -657,9 +658,21 @@ Hound ships a skill, MCP server, and harness-specific examples for OpenCode V2, 
 ```sh
 hound integrations detect
 hound integrations install --help
+hound integrations uninstall --detect --dry-run
 ```
 
-Installation requires explicit confirmation. The examples under [`integrations/`](integrations/) must be merged into the target harness configuration; [`plugins/hound/plugin.json`](plugins/hound/plugin.json) is a reference bundle, not a universal plugin format. The packaged agent workflow lives at [`skills/hound-tracer/SKILL.md`](skills/hound-tracer/SKILL.md).
+Installation and removal require explicit confirmation. Integration removal deletes Hound-owned skills and configuration entries while preserving unrelated harness configuration. The examples under [`integrations/`](integrations/) must be merged into the target harness configuration; [`plugins/hound/plugin.json`](plugins/hound/plugin.json) is a reference bundle, not a universal plugin format. The packaged agent workflow lives at [`skills/hound-tracer/SKILL.md`](skills/hound-tracer/SKILL.md).
+
+### Uninstall
+
+Preview integration cleanup or full package removal before changing the environment:
+
+```sh
+hound integrations uninstall --detect --scope global --dry-run
+hound uninstall --remove-integrations --purge-project --purge-user-data --dry-run
+```
+
+Rerun without `--dry-run` and confirm the prompt to apply the removal. Non-interactive environments require `--yes`. By default, `hound uninstall` removes only the Python package; project workspaces, configuration, model caches, and harness integrations are retained unless their corresponding removal options are supplied. Select an installer explicitly with `--package-manager uv`, `pipx`, or `pip` if automatic detection does not match the original installation method.
 
 ## Security and trust boundaries
 
