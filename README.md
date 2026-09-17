@@ -48,17 +48,17 @@ Use Hound when you need a repeatable investigation artifact rather than another 
 
 ## Why Hound
 
-**Evidence first.** Reports retain concrete evidence references, framed stack traces, failed tests, source locations, and uncertainty instead of returning an unsupported diagnosis.
+🔎 **Evidence first.** Reports retain concrete evidence references, framed stack traces, failed tests, source locations, and uncertainty instead of returning an unsupported diagnosis.
 
-**Private by default.** Offline mode makes no provider request. Redaction runs before supported content reaches reports, model prompts, dedup snapshots, or delivery connectors.
+🔒 **Private by default.** Offline mode makes no provider request. Redaction runs before supported content reaches reports, model prompts, dedup snapshots, or delivery connectors.
 
-**One engine, several interfaces.** The CLI, Textual TUI, HTTP service, GitHub Action, and MCP server use the same analysis pipeline and document schema.
+🧭 **One engine, several interfaces.** The CLI, Textual TUI, HTTP service, GitHub Action, and MCP server use the same analysis pipeline and document schema.
 
-**Controlled model usage.** Deduplication, failure-kind routing, call limits, retry limits, concurrency limits, and USD budgets keep optional LLM use bounded.
+📉 **Controlled model usage.** Deduplication, failure-kind routing, call limits, retry limits, concurrency limits, and USD budgets keep optional LLM use bounded.
 
-**QA beyond one failure.** Hound stores test history, detects flakiness and duration regressions, compares coverage, reads SARIF, and evaluates versioned quality-gate policies.
+🧪 **QA beyond one failure.** Hound stores test history, detects flakiness and duration regressions, compares coverage, reads SARIF, and evaluates versioned quality-gate policies.
 
-**Recoverable delivery.** GitHub, Jira, GitLab, and Slack delivery uses a persistent ledger to distinguish confirmed, failed, pending, and ambiguous outcomes. Delivery remains opt-in.
+📨 **Recoverable delivery.** GitHub, Jira, GitLab, and Slack delivery uses a persistent ledger to distinguish confirmed, failed, pending, and ambiguous outcomes. Delivery remains opt-in.
 
 ## How it works
 
