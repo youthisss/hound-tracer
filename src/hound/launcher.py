@@ -25,9 +25,10 @@ def _read_key() -> str:
     if os.name == "nt":
         import msvcrt
 
-        key = msvcrt.getwch()
+        getwch = getattr(msvcrt, "getwch")
+        key = getwch()
         if key in {"\x00", "\xe0"}:
-            return {"H": "up", "P": "down"}.get(msvcrt.getwch(), "")
+            return {"H": "up", "P": "down"}.get(getwch(), "")
         return {"\r": "enter", "\x1b": "escape", "\x03": "escape"}.get(key, key)
     import termios  # type: ignore[import-not-found]
     import tty  # type: ignore[import-not-found]
