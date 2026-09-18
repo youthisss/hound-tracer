@@ -107,6 +107,24 @@ The CLI, TUI, HTTP service, GitHub Action, and MCP server call the same applicat
 
 Hound supports CPython `>=3.10,<3.14`. Windows and Linux are tested. macOS is expected to be portable, but release-runner evidence is still pending. See the [support matrix](docs/support-matrix.md).
 
+### Linux, macOS, or WSL
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/youthisss/hound-tracer/main/install.sh | sh
+```
+
+The installer uses `uv tool`, installs `uv` when it is missing, and verifies the resulting `hound` executable.
+
+### Windows (native PowerShell)
+
+Native Windows runs the CLI, TUI, service, and MCP server without WSL. Run this in PowerShell:
+
+```powershell
+iex (irm https://raw.githubusercontent.com/youthisss/hound-tracer/main/install.ps1)
+```
+
+Close applications that are running `hound` or `hound-mcp` before upgrading. Windows locks active executables; the installer stops before making changes when it detects a running Hound process.
+
 ### uv tool, recommended
 
 ```sh
@@ -114,6 +132,8 @@ uv tool install hound-tracer
 hound --version
 hound doctor
 ```
+
+Running either installer again upgrades the existing `uv tool` installation. To install a specific release, set `HOUND_VERSION` first.
 
 ### pipx or pip
 
