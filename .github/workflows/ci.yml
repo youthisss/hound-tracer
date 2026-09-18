@@ -31,6 +31,8 @@ jobs:
         run: uv run pytest tests/e2e/test_eval.py -q
       - name: Smoke critical CLI workflows before merge
         run: uv run pytest tests/e2e/test_action_entrypoint.py tests/e2e/test_cli.py tests/e2e/test_batch.py tests/e2e/test_cli_gh.py -q
+      - name: Validate bootstrap installers
+        run: uv run pytest tests/unit/test_bootstrap_installers.py -q
       - name: Smoke critical TUI workflows before merge
         run: uv run pytest tests/e2e/test_tui.py -k "test_tui_compose or test_tui_analyze or test_tui_no_logs or test_tui_back_navigation_and_shortcuts" -q
       - run: uv run python -m hound.eval --offline --check --format json
