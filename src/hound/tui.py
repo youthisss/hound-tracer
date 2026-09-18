@@ -1900,12 +1900,13 @@ class HelpScreen(ModalScreen[None]):
             row("m", "Toggle sidebar"),
             "  [dim]Tabs: Overview · Report · Ticket · Raw log · Context[/dim]\n",
             "[bold #8f8f8f]ACTIONS & ANALYSIS[/bold #8f8f8f]",
-            row("a", "Analyze selected", "A", "Analyze all filtered"),
+            row("a", "Analyze selected (Artifacts)", "A", "Analyze all (Artifacts)"),
             row("x", "Stop active analysis", "X", "Clear all results"),
             row("z / d", "Select / deselect all", "space", "Select / deselect one"),
             row("enter", "Open selected result", "v", "Record feedback"),
             row("c", "Copy active report/ticket", "", ""),
-            row("r", "Reload / refresh", "k", "Unfocus active field"),
+            row("r", "Run project (Runs)", "Ctrl+R", "Refresh current view"),
+            row("k", "Unfocus active field"),
             "\n[bold #8f8f8f]NAVIGATION & CONTROLS[/bold #8f8f8f]",
             row("esc", "Back / dismiss", "g", "Focus active list"),
             row("p / n", "Prev / next page", "b", "Browse folder"),
@@ -2914,8 +2915,8 @@ class HoundTui(App):
         Binding("A", "analyze_all", "Analyze all", show=False),
         Binding("x", "stop_or_clear_selected", "Stop/Clear selected", show=False),
         Binding("ctrl+x", "stop_analysis", "Stop analysis", show=False),
-        Binding("r", "refresh", "Refresh", show=False),
-        Binding("ctrl+r", "run_project", "Run project", show=False),
+        Binding("r", "run_project", "Run project", show=False),
+        Binding("ctrl+r", "refresh", "Refresh", show=False),
         Binding("o", "toggle_offline", "Toggle Offline", show=False),
         Binding("c", "copy_report", "Copy Report", show=False),
         Binding("b", "browse_directory", "Browse Folder", show=False),
@@ -2960,6 +2961,11 @@ class HoundTui(App):
             if action in {"unfocus", "back"}:
                 return True
             return False
+        view = self._current_view_state()
+        if action in {"analyze", "analyze_all"}:
+            return view == ("workspace", "artifacts")
+        if action == "run_project":
+            return view == ("workspace", "runs")
         return super().check_action(action, parameters)
 
     def __init__(
@@ -3522,11 +3528,11 @@ class HoundTui(App):
         key = "bold #b8b8b8"
         can_back = self._current_view_state() != ("home", None)
         back_hint = f"[{key}]esc[/{key}] back  " if can_back else ""
-        analyze_hint = f"[{key}]x[/{key}] stop analyze  " if self._analyzing else f"[{key}]a[/{key}] analyze  "
+        analyze_hint = f"[{key}]x[/{key}] stop analyze  " if self._analyzing else ""
         if self.has_class("compact"):
             common = f"{back_hint}{analyze_hint}[{key}]b[/{key}] browse  [{key}]m[/{key}] sidebar  [{key}]s[/{key}] settings  [{key}]?[/{key}] help  [{key}]q[/{key}] quit"
         else:
-            common = f"{back_hint}{analyze_hint}[{key}]b[/{key}] browse  [{key}]m[/{key}] sidebar  [{key}]h[/{key}] home  [{key}]r[/{key}] refresh  [{key}]s[/{key}] settings  [{key}]?[/{key}] help  [{key}]q[/{key}] quit"
+            common = f"{back_hint}{analyze_hint}[{key}]b[/{key}] browse  [{key}]m[/{key}] sidebar  [{key}]h[/{key}] home  [{key}]ctrl+r[/{key}] refresh  [{key}]s[/{key}] settings  [{key}]?[/{key}] help  [{key}]q[/{key}] quit"
         contextual = {
             "pane-report": f"[{key}]c[/{key}] copy report  ",
             "pane-ticket": f"[{key}]c[/{key}] copy ticket  ",
@@ -3555,7 +3561,7 @@ class HoundTui(App):
         except Exception:
             project_runs_ws = None
         if project_runs_ws is not None and project_runs_ws.display:
-            contextual = f"[{key}]ctrl+r[/{key}] run project  [{key}]enter[/{key}] details  "
+            contextual = f"[{key}]r[/{key}] run project  [{key}]enter[/{key}] details  "
         try:
             results_ws: Vertical | None = self.query_one("#results-workspace", Vertical)
         except Exception:

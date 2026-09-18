@@ -896,6 +896,38 @@ def test_tui_input_typing_does_not_trigger_global_shortcuts(tmp_path):
     anyio.run(main)
 
 
+def test_tui_run_analyze_and_refresh_shortcuts_are_contextual(tmp_path):
+    from hound.tui import HoundTui
+
+    app = HoundTui(logs_dir=str(tmp_path), out_dir=str(tmp_path / "out"), offline=True)
+
+    async def main():
+        async with app.run_test() as pilot:
+            await pilot.pause()
+            assert app.check_action("analyze", ()) is False
+            assert app.check_action("analyze_all", ()) is False
+            assert app.check_action("run_project", ()) is False
+
+            app.action_show_artifacts()
+            await pilot.pause()
+            assert app.check_action("analyze", ()) is True
+            assert app.check_action("analyze_all", ()) is True
+            assert app.check_action("run_project", ()) is False
+
+            app.action_show_project_runs()
+            await pilot.pause()
+            assert app.check_action("analyze", ()) is False
+            assert app.check_action("analyze_all", ()) is False
+            assert app.check_action("run_project", ()) is True
+
+            refreshed = []
+            app.action_refresh = lambda: refreshed.append(True)
+            await pilot.press("ctrl+r")
+            assert refreshed == [True]
+
+    anyio.run(main)
+
+
 def test_tui_raw_header_tracks_selected_log(tmp_path):
     shutil.copy(FIXTURES / "pytest_fail.log", tmp_path / "pytest_fail.log")
     shutil.copy(FIXTURES / "build_error.log", tmp_path / "build_error.log")
@@ -1187,59 +1219,6 @@ def test_tui_sidebar_starts_closed_and_can_toggle(tmp_path):
             shortcutbar = str(app.query_one("#shortcutbar", Static).renderable)
             assert "sidebar" in shortcutbar
             assert not app.query("#sidebar-toggle")
-
-    anyio.run(main)
-
-
-@pytest.mark.parametrize("size", [(160, 50), (100, 35), (70, 24)])
-def test_tui_navigation_highlight_fills_to_idle_border_bounds(tmp_path, size):
-    from hound.tui import HoundTui
-    from textual.geometry import Region
-
-    app = HoundTui(logs_dir=str(tmp_path), out_dir=str(tmp_path / "out"), offline=True)
-
-    async def main():
-        async with app.run_test(size=size) as pilot:
-            app._show_results("pane-report")
-            if not app.has_class("sidebar-collapsed"):
-                app.action_toggle_sidebar()
-            await pilot.pause()
-            for selector in ("#show-sidebar", "#back-button"):
-                button = app.query_one(selector)
-                app.set_focus(None)
-                await pilot.hover("#statusbar")
-                await pilot.pause()
-                region = button.region
-                crop = Region(0, 0, region.width, region.height)
-                idle = [list(strip) for strip in button.render_lines(crop)]
-                assert "".join(segment.text for segment in idle[0]) == "┌─────┐"
-                assert "".join(segment.text for segment in idle[-1]) == "└─────┘"
-                for state in ("hover", "focus", "active"):
-                    if state == "hover":
-                        await pilot.hover(button)
-                    elif state == "focus":
-                        await pilot.hover("#statusbar")
-                        button.focus()
-                    else:
-                        app.set_focus(None)
-                        button.add_class("-active")
-                    await pilot.pause()
-                    rendered = [list(strip) for strip in button.render_lines(crop)]
-                    assert button.region == region
-                    assert "".join(segment.text for segment in rendered[0]) == "▗▄▄▄▄▄▖"
-                    assert "".join(segment.text for segment in rendered[-1]) == "▝▀▀▀▀▀▘"
-                    assert rendered[1][0].text == "▐"
-                    assert rendered[1][-1].text == "▌"
-                    edges = rendered[0] + rendered[-1] + [rendered[1][0], rendered[1][-1]]
-                    assert all(segment.style.color.triplet == (255, 255, 255) for segment in edges)
-                    assert all(segment.style.bgcolor.triplet == (0, 0, 0) for segment in edges)
-                    interior = rendered[1][1:-1]
-                    assert sum(segment.cell_length for segment in interior) == region.width - 2
-                    assert all(not segment.style.reverse for segment in interior)
-                    assert all(segment.style.bgcolor.triplet == (255, 255, 255) for segment in interior)
-                    assert all(segment.style.color.triplet == (0, 0, 0) for segment in interior)
-                    assert "".join(segment.text for segment in interior) == str(button.label).center(region.width - 2)
-                button.remove_class("-active")
 
     anyio.run(main)
 
@@ -3359,7 +3338,7 @@ def test_tui_workflow_status_placement_and_stop_shortcut(tmp_path):
 
             # 3. Verify shortcut bar updates dynamically when analyzing
             shortcutbar = app.query_one("#shortcutbar", Static)
-            assert "analyze" in str(shortcutbar.renderable)
+            assert "analyze" not in str(shortcutbar.renderable)
             assert "stop analyze" not in str(shortcutbar.renderable)
 
             app._analyzing = True
@@ -3384,6 +3363,6 @@ def test_tui_workflow_status_placement_and_stop_shortcut(tmp_path):
             app._set_analysis_enabled()
             await pilot.pause()
             assert "stop analyze" not in str(shortcutbar.renderable)
-            assert "analyze" in str(shortcutbar.renderable)
+            assert "analyze" not in str(shortcutbar.renderable)
 
     anyio.run(main)

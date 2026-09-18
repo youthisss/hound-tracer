@@ -7,11 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.8.0] - 2026-09-18
+
 ### Added
 - Added bootstrap installers for Linux, macOS, WSL, and native Windows that
   install Hound through `uv tool` and verify the resulting executable.
+- Added contextual live progress boxes for long-running commands in the
+  persistent CLI, including analysis, project runs, quality gates, test-history
+  operations, model refresh, remote jobs, and integration installation.
+- Added interactive command-specific help after the persistent CLI command list.
 
-### Fixed
+### Changed
+- Renamed the stored-analysis listing command to `hound results`, while retaining
+  `hound list-runs` as a compatibility alias and rejecting the typo-prone `runs`.
+- Refined the launcher and persistent CLI layouts for wide and narrow terminals.
+- Made TUI shortcuts contextual: `Ctrl+R` refreshes, `R` runs projects only in
+  the Runs workspace, and `A` / `Shift+A` analyze only in Artifacts.
 - Made the Windows installer reject upgrades while Hound processes are active,
   avoiding partial entry-point replacement when Windows locks the tool environment.
 

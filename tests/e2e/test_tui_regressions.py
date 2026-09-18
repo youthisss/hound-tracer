@@ -29,6 +29,8 @@ def test_tui_analyze_all_processes_visible_logs(tmp_path):
         async with app.run_test() as pilot:
             await pilot.pause()
             assert len(app._log_files) == 2
+            app.action_show_artifacts()
+            await pilot.pause()
             await pilot.press("A")
             for _ in range(600):
                 await pilot.pause(0.02)

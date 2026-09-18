@@ -1,6 +1,11 @@
 from hound import launcher
 
 
+def test_launcher_view_uses_available_width_and_adapts_header():
+    assert launcher._launcher_view(0, 120).width == 96
+    assert launcher._launcher_view(0, 50).width == 48
+
+
 def test_interface_chooser_selects_server(monkeypatch):
     keys = iter(("down", "down", "enter"))
     monkeypatch.setattr("hound.launcher.console", lambda: _ConsoleStub())
