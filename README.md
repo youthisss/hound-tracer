@@ -246,7 +246,7 @@ The local SQLite history store tracks outcomes, durations, branches, commits, an
 
 - name: Investigate failure
   if: steps.tests.outcome == 'failure'
-  uses: youthisss/hound-tracer@v0.7.1
+  uses: youthisss/hound-tracer@v0.8.0
   with:
     log: artifacts/pytest.log
     repo: ${{ github.workspace }}
@@ -284,7 +284,7 @@ The release image runs the main Hound process as a non-root user.
 | Persistent CLI | `hound cli` | Command completion, history, help, and repeated local work |
 | Terminal UI | `hound console` | Browse artifacts, run projects, inspect reports, and review QA history |
 | HTTP service | `hound serve` | Authenticated queued analysis behind a controlled reverse proxy |
-| GitHub Action | `uses: youthisss/hound-tracer@v0.7.1` | Failure investigation in GitHub workflows |
+| GitHub Action | `uses: youthisss/hound-tracer@v0.8.0` | Failure investigation in GitHub workflows |
 | MCP server | `hound-mcp` or `hound mcp` | Bounded diagnostic tools for coding agents |
 
 ### Terminal UI
@@ -350,7 +350,7 @@ The [engine surface matrix](docs/reference/engine-surface.md) shows what is expo
 | `hound gate` | Evaluate tests, coverage, changed lines, and SARIF |
 | `hound insights` | Import, export, classify, and query test history |
 | `hound serve` / `hound client` | Operate the HTTP job service |
-| `hound runs` / `hound report` | Inspect stored analyses |
+| `hound results` / `hound report` | Inspect stored analyses |
 | `hound incidents` | Inspect recurrence and invalidate cached RCA snapshots |
 | `hound feedback` | Record reviews or export regression candidates |
 | `hound delivery` | Inspect and recover delivery-ledger records |
@@ -536,7 +536,7 @@ Contributions should preserve deterministic offline behavior, default redaction,
 
 ## Project status
 
-Hound Tracer `0.7.1` is beta software. CPython 3.10, 3.11, 3.12, and 3.13 are supported. Platform evidence and external release gates are tracked in the [support matrix](docs/support-matrix.md). Releases follow [Semantic Versioning](https://semver.org/) and are recorded in the [changelog](CHANGELOG.md).
+Hound Tracer `0.8.0` is beta software. CPython 3.10, 3.11, 3.12, and 3.13 are supported. Platform evidence and external release gates are tracked in the [support matrix](docs/support-matrix.md). Releases follow [Semantic Versioning](https://semver.org/) and are recorded in the [changelog](CHANGELOG.md).
 
 ## License
 

@@ -9,14 +9,14 @@ from hound.config import load_config
 
 def test_package_metadata_version_matches_init():
     # hatch dynamic version resolves hound.__version__
-    assert __version__ == "0.7.1"
+    assert __version__ == "0.8.0"
 
 
 def test_canonical_command_names_and_legacy_aliases(monkeypatch):
     parser = build_parser()
     help_text = parser.format_help()
-    assert all(name in help_text for name in ("console", "serve", "providers", "runs", "insights"))
-    assert all(name not in help_text for name in ("tui", "server", "list-providers", "list-runs"))
+    assert all(name in help_text for name in ("console", "serve", "providers", "results", "insights"))
+    assert all(name not in help_text for name in ("tui", "server", "list-providers"))
 
     args_insights = parser.parse_args(["insights", "tests", "--output-dir", "out"])
     assert args_insights.command == "insights"
@@ -40,8 +40,8 @@ def test_canonical_command_names_and_legacy_aliases(monkeypatch):
     args_providers = parser.parse_args(["providers", "--json"])
     assert args_providers.command == "providers"
 
-    args_runs = parser.parse_args(["runs", "--output-dir", "out", "--json"])
-    assert args_runs.command == "runs"
+    args_runs = parser.parse_args(["results", "--output-dir", "out", "--json"])
+    assert args_runs.command == "results"
 
     legacy_options = parser.parse_args([
         "analyze", "logs", "--out", "out", "--repo", "repo", "--no-redact",
@@ -57,7 +57,9 @@ def test_canonical_command_names_and_legacy_aliases(monkeypatch):
     assert parser.parse_args(["tui"]).command == "console"
     assert parser.parse_args(["server"]).command == "serve"
     assert parser.parse_args(["list-providers"]).command == "providers"
-    assert parser.parse_args(["list-runs"]).command == "runs"
+    assert parser.parse_args(["list-runs"]).command == "results"
+    with pytest.raises(SystemExit):
+        parser.parse_args(["runs"])
     monkeypatch.setattr("sys.argv", ["hound", "qa", "tests"])
     assert parser.parse_args().command == "insights"
 

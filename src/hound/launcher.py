@@ -8,9 +8,10 @@ from collections.abc import Callable
 
 from rich.console import Group
 from rich.panel import Panel
+from rich.table import Table
 from rich.text import Text
 
-from hound import __version__
+from hound import BRAND_NAME, __version__
 from hound.presentation import brand_header, console
 
 CHOICES = (
@@ -46,18 +47,37 @@ def _read_key() -> str:
         termios.tcsetattr(fd, termios.TCSADRAIN, previous)  # type: ignore[attr-defined]
 
 
-def _launcher_view(selected: int) -> Panel:
-    menu = Text()
+def _launcher_width(terminal_width: int) -> int:
+    return max(38, min(96, terminal_width - 2))
+
+
+def _launcher_view(selected: int, terminal_width: int = 98) -> Panel:
+    width = _launcher_width(terminal_width)
+    if width >= 60:
+        header = brand_header(__version__)
+    else:
+        header = Text()
+        header.append(BRAND_NAME.upper(), style="bold white")
+        header.append(f"  v{__version__}\n", style="dim white")
+        header.append("Following the evidence", style="dim white")
+
+    menu = Table.grid(padding=(0, 2), expand=True)
+    menu.add_column(width=2, no_wrap=True)
+    menu.add_column(width=18, no_wrap=True)
+    menu.add_column(overflow="fold")
     for index, (label, detail) in enumerate(CHOICES):
         active = index == selected
-        menu.append("  › " if active else "    ", style="bold white" if active else "white")
-        menu.append(label, style="reverse bold" if active else "bold white")
-        menu.append(f"\n      {detail}\n\n", style="white" if active else "dim white")
-    footer = Text("↑↓ Move    Enter Select    Esc Exit", style="dim white")
+        marker = Text("›" if active else "", style="bold white")
+        name = Text(label, style="reverse bold" if active else "bold white")
+        description = Text(detail, style="white" if active else "dim white")
+        menu.add_row(marker, name, description)
+        if index < len(CHOICES) - 1:
+            menu.add_row("", "", "")
+    footer = Text("↑/↓ Move    Enter Select    Esc Exit", style="dim white")
     return Panel(
-        Group(brand_header(__version__), Text("Choose how you want to run Hound\n", style="bold white"), menu, footer),
+        Group(header, Text("Choose how you want to run Hound\n", style="bold white"), menu, Text(""), footer),
         border_style="white",
-        width=72,
+        width=width,
         padding=(1, 2),
     )
 
@@ -67,7 +87,7 @@ def choose_interface(*, read_key: Callable[[], str] = _read_key) -> str:
     output = console()
     while True:
         output.clear()
-        output.print(_launcher_view(selected))
+        output.print(_launcher_view(selected, getattr(output, "width", 98)))
         key = read_key()
         if key == "up":
             selected = (selected - 1) % len(CHOICES)

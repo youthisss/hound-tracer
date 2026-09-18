@@ -50,7 +50,7 @@ _LEGACY_COMMAND_ALIASES = {
     "tui": "console",
     "server": "serve",
     "list-providers": "providers",
-    "list-runs": "runs",
+    "list-runs": "results",
     "qa": "insights",
 }
 
@@ -260,7 +260,7 @@ def build_parser() -> argparse.ArgumentParser:
     report_cmd.add_argument("--output-dir", dest="out", default=DEFAULT_OUT, help="analysis output directory")
     report_cmd.add_argument("--format", choices=("text", "json", "markdown"), default="text")
     report_cmd.add_argument("--output", default=None, help="write formatted report to this file")
-    runs_cmd = sub.add_parser("runs", help="list stored analysis runs")
+    runs_cmd = sub.add_parser("results", help="list stored analysis results")
     runs_cmd.add_argument("--output-dir", dest="out", default=DEFAULT_OUT, help="analysis output directory")
     runs_cmd.add_argument("--json", action="store_true", help="output as JSON")
     clean_cmd = sub.add_parser("clean", help="remove stored analysis output")
@@ -649,6 +649,14 @@ def run_analyze(args: argparse.Namespace) -> int:
         return 2
     cfg_path = _discover_config(args.config, args.repo)
     redact = False if getattr(args, "no_redact", False) else None
+    from hound.presentation import TaskMessage
+
+    task_enabled = bool(
+        getattr(args, "interactive_cli", False)
+        and getattr(args, "format", "text") == "text"
+        and not getattr(args, "output", None)
+    )
+    mode = "Offline rules" if args.offline else (getattr(args, "provider", None) or "Configured provider")
     try:
         common = {
             "repo_dir": args.repo,
@@ -669,13 +677,25 @@ def run_analyze(args: argparse.Namespace) -> int:
             "llm_preview": getattr(args, "llm_preview", False),
         }
         common["require_llm"] = getattr(args, "require_llm", False) or None
-        if legacy_file:
-            legacy_common = dict(common)
-            legacy_common.pop("jobs", None)
-            document = service.analyze_log(path, args.out, **legacy_common)
-            runs = [service.AnalysisRun(path.stem, path, Path(args.out), document)]
-        else:
-            runs = service.analyze_directory(path, args.out, **common)
+        with TaskMessage(
+            "ANALYZE",
+            (
+                ("Input", path),
+                ("Mode", mode),
+                ("Output", args.out),
+                ("Workers", common["jobs"]),
+            ),
+            "Collecting and analyzing evidence",
+            enabled=task_enabled,
+        ) as task:
+            if legacy_file:
+                legacy_common = dict(common)
+                legacy_common.pop("jobs", None)
+                document = service.analyze_log(path, args.out, **legacy_common)
+                runs = [service.AnalysisRun(path.stem, path, Path(args.out), document)]
+            else:
+                runs = service.analyze_directory(path, args.out, **common)
+            task.update("Preparing analysis results")
     except (service.AnalysisInputError, FileNotFoundError, PermissionError, ValueError) as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 2
@@ -1450,8 +1470,23 @@ def run_project(args: argparse.Namespace) -> int:
     except ValueError as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 2
+    from hound.ingest.redact import redact_text
+    from hound.presentation import TaskMessage
+
+    command_display = redact_text(subprocess.list2cmdline(command))[0]
+    task_enabled = bool(getattr(args, "interactive_cli", False) and not args.json)
     try:
-        result = service.execute_project_run(request)
+        with TaskMessage(
+            "RUN PROJECT",
+            (
+                ("Directory", request.cwd),
+                ("Command", command_display),
+                ("Timeout", f"{args.timeout}s"),
+            ),
+            "Running project command",
+            enabled=task_enabled,
+        ):
+            result = service.execute_project_run(request)
     except (CollectionInputError, OSError, ValueError) as exc:
         print(f"error: project command failed: {exc}", file=sys.stderr)
         return 3
@@ -1472,23 +1507,33 @@ def run_project(args: argparse.Namespace) -> int:
     if args.analyze:
         output = Path(args.out).expanduser() if args.out else request.cwd / WORKSPACE_RESULTS
         try:
-            service.analyze_log(
-                result.collected.log_file,
-                output,
-                repo_dir=request.cwd,
-                offline=args.offline,
-                config_path=args.config,
-                no_dedup=args.no_dedup,
-                provider=args.provider,
-                model=args.model,
-                base_url=args.base_url,
-                api_key=args.api_key,
-                redact=False if args.no_redact else None,
-                max_retries=args.max_retries,
-                source_context=args.source_context,
-                source_class=args.source_class,
-                require_llm=args.require_llm or None,
-            )
+            with TaskMessage(
+                "ANALYZE RUN",
+                (
+                    ("Capture", result.collected.log_file),
+                    ("Output", output),
+                    ("Mode", "Offline rules" if args.offline else (args.provider or "Configured provider")),
+                ),
+                "Analyzing captured command output",
+                enabled=task_enabled,
+            ):
+                service.analyze_log(
+                    result.collected.log_file,
+                    output,
+                    repo_dir=request.cwd,
+                    offline=args.offline,
+                    config_path=args.config,
+                    no_dedup=args.no_dedup,
+                    provider=args.provider,
+                    model=args.model,
+                    base_url=args.base_url,
+                    api_key=args.api_key,
+                    redact=False if args.no_redact else None,
+                    max_retries=args.max_retries,
+                    source_context=args.source_context,
+                    source_class=args.source_class,
+                    require_llm=args.require_llm or None,
+                )
         except (service.AnalysisInputError, OSError, ValueError) as exc:
             print(f"error: analysis failed: {exc}", file=sys.stderr)
             return 3
@@ -2425,7 +2470,7 @@ def _dispatch(args: argparse.Namespace, parser: argparse.ArgumentParser) -> int:
         return run_models(args)
     if args.command == "report":
         return run_report(args)
-    if args.command in {"list-runs", "runs"}:
+    if args.command == "results":
         return run_list_runs(args)
     if args.command == "clean":
         return run_clean(args)
