@@ -138,6 +138,18 @@ def test_output_file_follows_format(tmp_path, monkeypatch, capsys):
     assert json.loads(output.read_text(encoding="utf-8"))["count"] == 1
 
 
+def test_text_analysis_result_uses_panel_in_tty(tmp_path, monkeypatch, capsys):
+    artifact = tmp_path / "failure.log"
+    artifact.write_text("pytest\nFAILED tests/test_a.py::test_a - AssertionError: mismatch\n", encoding="utf-8")
+    monkeypatch.setattr("hound.cli.rich_enabled", lambda _stream: True)
+
+    assert main(["analyze", str(artifact), "--offline", "--out", str(tmp_path / "out")]) == 1
+
+    output = capsys.readouterr().out
+    assert "ANALYSIS RESULT" in output
+    assert "severity:" in output
+
+
 def test_init_list_runs_and_clean(tmp_path, capsys):
     config = tmp_path / ".hound.yml"
     assert main(["init", "--config", str(config)]) == 0
@@ -209,6 +221,20 @@ def test_run_project_preserves_child_exit_code(tmp_path, capsys):
         sys.executable, "-c", "raise SystemExit(7)",
     ]) == 7
     assert "status   : failed" in capsys.readouterr().out
+
+
+def test_run_project_result_uses_panel_in_tty(tmp_path, monkeypatch, capsys):
+    monkeypatch.setattr("hound.cli.rich_enabled", lambda _stream: True)
+
+    assert main([
+        "run", "--directory", str(tmp_path), "--",
+        sys.executable, "-c", "print('project output')",
+    ]) == 0
+
+    output = capsys.readouterr().out
+    assert "PROJECT RUN RESULT" in output
+    assert "Status" in output
+    assert "passed" in output
 
 
 def test_run_detect_lists_shared_manifest_suggestions(tmp_path, capsys):

@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.9.0] - 2026-09-18
+
+### Changed
+- Added bordered result panels for interactive `hound analyze` output while
+  preserving plain-text output for redirects and machine-readable JSON output.
+- Added a unified project-run result panel for status, exit code, duration,
+  captures, records, discovered artifacts, and optional analysis reports.
+
 ## [0.8.0] - 2026-09-18
 
 ### Added
