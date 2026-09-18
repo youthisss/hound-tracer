@@ -39,7 +39,7 @@ jobs:
       - name: Smoke canonical CLI command help
         shell: bash
         run: |
-          for command in analyze batch console serve log gate insights doctor init config providers models runs report feedback delivery incidents client clean; do
+          for command in analyze batch console serve log gate insights doctor init config providers models results report feedback delivery incidents client clean; do
             uv run hound "$command" --help >/dev/null
           done
 
