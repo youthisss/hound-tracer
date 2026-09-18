@@ -63,6 +63,11 @@ def show_panel(title: str, rows: Iterable[tuple[str, object]], *, subtitle: str 
     console().print(Panel(table, title=title, subtitle=subtitle, border_style="white", expand=False))
 
 
+def show_text_panel(title: str, content: str) -> None:
+    """Render preformatted human-readable output in a bounded CLI panel."""
+    console().print(Panel(Text(content), title=title, border_style="white", expand=False, padding=(1, 2)))
+
+
 def show_table(title: str, columns: list[str], rows: Iterable[Iterable[object]]) -> None:
     table = Table(title=title, border_style="white", header_style="bold white", show_lines=False)
     for column in columns:

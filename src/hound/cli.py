@@ -24,6 +24,7 @@ from hound.formatters import format_document, format_runs
 from hound.models import KINDS, SCHEMA_VERSION, Ticket
 from hound.pipeline import default_state_path
 from hound.pathutil import path_has_symlink
+from hound.presentation import rich_enabled, show_panel, show_text_panel
 from hound.service import SUPPORTED_LOG_SUFFIXES, is_sidecar
 from hound.triage.dedup import configure_store
 from hound.trust import SOURCE_CLASSES
@@ -705,7 +706,11 @@ def run_analyze(args: argparse.Namespace) -> int:
 
     rendered = format_runs(runs, getattr(args, "format", "text"))
     try:
-        _emit_output(rendered, getattr(args, "output", None))
+        _emit_output(
+            rendered,
+            getattr(args, "output", None),
+            boxed=getattr(args, "format", "text") == "text",
+        )
     except OSError as exc:
         print(f"error: could not write output: {exc}", file=sys.stderr)
         return 3
@@ -752,11 +757,13 @@ def _write_github_outputs(runs: list[service.AnalysisRun]) -> None:
             stream.write(f"{key}<<{delimiter}\n{value}\n{delimiter}\n")
 
 
-def _emit_output(rendered: str, output_path: str | None) -> None:
+def _emit_output(rendered: str, output_path: str | None, *, boxed: bool = False) -> None:
     if output_path:
         path = Path(output_path)
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(rendered + "\n", encoding="utf-8")
+    elif boxed and rich_enabled(sys.stdout):
+        show_text_panel("ANALYSIS RESULT", rendered)
     else:
         print(rendered)
 
@@ -1490,18 +1497,17 @@ def run_project(args: argparse.Namespace) -> int:
     except (CollectionInputError, OSError, ValueError) as exc:
         print(f"error: project command failed: {exc}", file=sys.stderr)
         return 3
+    result_rows = [
+        ("Status", result.record["status"]),
+        ("Exit code", result.record["exit_code"]),
+        ("Duration", f"{result.record['duration_ms'] / 1000:.1f}s"),
+        ("Capture", result.record["capture"]),
+        ("Record", request.runs_directory / (result.record["run_id"] + ".json")),
+    ]
+    if result.record["artifacts"]:
+        result_rows.append(("Artifacts", "\n".join(str(artifact) for artifact in result.record["artifacts"])))
     if args.json:
         print(json.dumps(result.record, indent=2, ensure_ascii=False))
-    else:
-        print(f"status   : {result.record['status']}")
-        print(f"exit code: {result.record['exit_code']}")
-        print(f"duration : {result.record['duration_ms'] / 1000:.1f}s")
-        print(f"capture  : {result.record['capture']}")
-        print(f"record   : {request.runs_directory / (result.record['run_id'] + '.json')}")
-        if result.record["artifacts"]:
-            print("artifacts:")
-            for artifact in result.record["artifacts"]:
-                print(f"  {artifact}")
     if result.error:
         print(f"warning: {result.error}", file=sys.stderr)
     if args.analyze:
@@ -1538,7 +1544,22 @@ def run_project(args: argparse.Namespace) -> int:
             print(f"error: analysis failed: {exc}", file=sys.stderr)
             return 3
         if not args.json:
-            print(f"analysis : {output / 'report.json'}")
+            result_rows.append(("Analysis", output / "report.json"))
+    if not args.json:
+        if rich_enabled(sys.stdout):
+            show_panel("PROJECT RUN RESULT", result_rows)
+        else:
+            labels = {
+                "Status": "status   ", "Exit code": "exit code", "Duration": "duration ",
+                "Capture": "capture  ", "Record": "record   ", "Analysis": "analysis ",
+            }
+            for label, value in result_rows:
+                if label == "Artifacts":
+                    print("artifacts:")
+                    for artifact in result.record["artifacts"]:
+                        print(f"  {artifact}")
+                else:
+                    print(f"{labels[label]}: {value}")
     return int(result.collected.exit_code)
 
 

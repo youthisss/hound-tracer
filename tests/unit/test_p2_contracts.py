@@ -9,7 +9,7 @@ from hound.config import load_config
 
 def test_package_metadata_version_matches_init():
     # hatch dynamic version resolves hound.__version__
-    assert __version__ == "0.8.0"
+    assert __version__ == "0.9.0"
 
 
 def test_canonical_command_names_and_legacy_aliases(monkeypatch):
